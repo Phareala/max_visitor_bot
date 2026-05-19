@@ -21,3 +21,6 @@ jobs:
             git pull origin main
             venv/bin/pip install -r requirements.txt
             sudo systemctl restart maxbot.service
+            sleep 3
+            sudo systemctl is-active maxbot.service
+
