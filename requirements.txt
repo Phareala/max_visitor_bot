@@ -1,0 +1,3 @@
+maxbot-api-client-python
+maxbot-chatbot-python
+python-dotenv
