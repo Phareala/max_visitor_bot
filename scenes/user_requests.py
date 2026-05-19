@@ -133,10 +133,10 @@ class UserRequestsScene:
             return
 
         # List navigation
-        if text == "/user_prev" and step == "browsing":
+        if text == "/user_prev":
             await self.show_user_requests(n, idx - 1)
             return
-        elif text == "/user_next" and step == "browsing":
+        elif text == "/user_next":
             await self.show_user_requests(n, idx + 1)
             return
         elif text == "/my_requests":

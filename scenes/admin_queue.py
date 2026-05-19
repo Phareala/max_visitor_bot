@@ -99,10 +99,10 @@ class AdminQueueScene:
             return
 
         # Queue navigation
-        if text == "/admin_prev" and step == "browsing":
+        if text == "/admin_prev":
             await self.show_queue(n, idx - 1)
             return
-        elif text == "/admin_next" and step == "browsing":
+        elif text == "/admin_next":
             await self.show_queue(n, idx + 1)
             return
         elif text == "/admin_queue":
