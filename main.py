@@ -16,6 +16,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger("max_visitor_bot")
 
+# Monkey patch Notification to edit instead of sending new message when clicked on callbacks
+from maxbot_chatbot_python import Notification
+from maxbot_api_client_python import models, utils
+
+original_reply_with_keyboard = Notification.reply_with_keyboard
+original_reply = Notification.reply
+
+async def smart_reply_with_keyboard(self, text: str, format_type: str | None, buttons: list[list[dict]]):
+    if self.type() == "message_callback" and getattr(self.update, "message_id", None):
+        try:
+            req = models.EditMessageReq(
+                message_id=self.update.message_id,
+                text=text,
+                format=format_type if format_type else None,
+                attachments=[utils.attach_keyboard(buttons)]
+            )
+            await self.bot.api.messages.edit_message_async(req)
+            return
+        except Exception as e:
+            logger.warning(f"Failed to edit message {self.update.message_id}, sending new: {e}")
+    await original_reply_with_keyboard(self, text, format_type, buttons)
+
+async def smart_reply(self, text: str, format_type: str | None = "markdown"):
+    if self.type() == "message_callback" and getattr(self.update, "message_id", None):
+        try:
+            req = models.EditMessageReq(
+                message_id=self.update.message_id,
+                text=text,
+                format=format_type if format_type else None,
+                attachments=[]
+            )
+            await self.bot.api.messages.edit_message_async(req)
+            return
+        except Exception as e:
+            logger.warning(f"Failed to edit message {self.update.message_id}, sending new: {e}")
+    await original_reply(self, text, format_type)
+
+Notification.reply_with_keyboard = smart_reply_with_keyboard
+Notification.reply = smart_reply
+
+
 async def main():
     # Load environment variables
     load_dotenv()

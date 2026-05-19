@@ -38,7 +38,7 @@ class MainMenuScene:
                 await next_scene.show_user_requests(n)
 
             case "/admin_queue":
-                if role == "admin":
+                if role in ["admin", "tech_admin"]:
                     from scenes.admin_queue import AdminQueueScene
                     next_scene = AdminQueueScene()
                     n.activate_next_scene(next_scene)
@@ -46,6 +46,7 @@ class MainMenuScene:
                 else:
                     await n.reply("⛔ Доступ ограничен. Эта функция доступна только администраторам ИБ.")
                     await self.send_main_menu(n)
+
 
             case "/delete_my_data":
                 buttons = [
@@ -139,10 +140,11 @@ class MainMenuScene:
         elif role == "tech_admin":
             text = (
                 "⚙️ **Панель Технического Администратора**\n\n"
-                "Добро пожаловать! Вам доступна техническая диагностика системы."
+                "Добро пожаловать! Вам доступна техническая диагностика системы и управление заявками."
             )
             buttons = [
                 [
+                    {"type": "callback", "text": "📥 Очередь заявок", "payload": "/admin_queue"},
                     {"type": "callback", "text": "📊 Статистика", "payload": "/tech_stats"},
                     {"type": "callback", "text": "📋 Журнал событий", "payload": "/tech_logs"}
                 ],
@@ -154,6 +156,7 @@ class MainMenuScene:
                     {"type": "callback", "text": "🗑 Удалить мои данные", "payload": "/delete_my_data"}
                 ]
             ]
+
         else:
             text = (
                 "📋 **Главное меню**\n\n"
