@@ -2,6 +2,11 @@ import os
 import re
 from datetime import datetime, timedelta
 import database
+import notifications
+
+# Queue accumulation threshold — warn admins when pending requests reach this number
+QUEUE_ALERT_THRESHOLD = 5
+
 
 class CreatePassScene:
     async def start(self, app):
@@ -49,8 +54,6 @@ class CreatePassScene:
 
         # Handle cancel action
         if text == "/cancel_wizard":
-            # Delete draft if any, but since we didn't save yet it is fine
-            # We just go back to main menu
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
             n.activate_next_scene(menu_scene)
@@ -64,9 +67,9 @@ class CreatePassScene:
                 "step": field,
                 "edit_mode": True
             })
-            
+
             cancel_btn = [[{"type": "callback", "text": "❌ Назад к сводке", "payload": "/back_to_summary"}]]
-            
+
             if field == "visitor_name":
                 await n.reply_with_keyboard("Введите новое **ФИО гостя**:", "markdown", cancel_btn)
             elif field == "visit_date":
@@ -98,10 +101,10 @@ class CreatePassScene:
                 "step": f"editcf_{field_name}",
                 "edit_mode": True
             })
-            
+
             f_def = database.get_custom_field_by_name(field_name, wizard_data.get("visit_zone", ""))
             desc = f_def["description"] if f_def else f"Введите новое значение для {field_name}:"
-            
+
             cancel_btn = [[{"type": "callback", "text": "❌ Назад к сводке", "payload": "/back_to_summary"}]]
             await n.reply_with_keyboard(desc, "markdown", cancel_btn)
             return
@@ -127,21 +130,27 @@ class CreatePassScene:
                 visit_zone=wizard_data["visit_zone"],
                 visit_purpose=wizard_data["visit_purpose"]
             )
-            
-            # Save custom fields values!
+
+            # Save custom fields values
             for name, val in wizard_data.get("custom_fields", {}).items():
                 database.save_request_custom_field_value(req_id, name, val)
-            
+
             # Immediately transition to "review" status
             database.update_request_status(req_id, "review", user_id)
-            
+
             await n.reply(
                 f"✅ **Заявка оформлена!**\n\n"
                 f"• Номер заявки: `#{req_id}`\n"
                 f"• Текущий статус: `На рассмотрении`\n\n"
                 f"Заявка передана в службу безопасности. Мы уведомим вас при изменении статуса."
             )
-            
+
+            # --- 2.1: Notify security admins about the new request ---
+            await self._notify_admins_new_request(n, req_id, wizard_data)
+
+            # Notify about any requests that expired while we were working
+            await notifications.send_expiry_notifications(n)
+
             # Go back to main menu
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
@@ -153,7 +162,7 @@ class CreatePassScene:
         if step.startswith("editcf_"):
             field_name = step.split("_", 1)[1]
             val = text.strip()
-            
+
             f_def = database.get_custom_field_by_name(field_name, wizard_data.get("visit_zone", ""))
             if f_def and f_def["is_required"] and not val:
                 cancel_btn = [[{"type": "callback", "text": "❌ Назад к сводке", "payload": "/back_to_summary"}]]
@@ -164,11 +173,11 @@ class CreatePassScene:
                     cancel_btn
                 )
                 return
-                
+
             if "custom_fields" not in wizard_data:
                 wizard_data["custom_fields"] = {}
             wizard_data["custom_fields"][field_name] = val
-            
+
             n.state_manager.update_state_data(n.state_id, {
                 "step": "summary",
                 "edit_mode": False
@@ -190,9 +199,9 @@ class CreatePassScene:
                     buttons
                 )
                 return
-            
+
             wizard_data["visitor_name"] = cleaned
-            
+
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
@@ -217,10 +226,10 @@ class CreatePassScene:
                 "завтра": (today + timedelta(days=1)).strftime("%d.%m.%Y"),
                 "послезавтра": (today + timedelta(days=2)).strftime("%d.%m.%Y")
             }
-            
+
             input_val = text.strip().lower()
             date_str = None
-            
+
             if input_val in quick_dates:
                 date_str = quick_dates[input_val]
             else:
@@ -229,7 +238,6 @@ class CreatePassScene:
                 if match:
                     try:
                         parsed_date = datetime.strptime(text.strip(), "%d.%m.%Y")
-                        # Enforce date is not in the past and not more than 365 days in the future
                         one_year_limit = today_date + timedelta(days=365)
                         if today_date <= parsed_date <= one_year_limit:
                             date_str = text.strip()
@@ -249,7 +257,7 @@ class CreatePassScene:
                 return
 
             wizard_data["visit_date"] = date_str
-            
+
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
@@ -267,7 +275,6 @@ class CreatePassScene:
 
         elif step == "visit_time":
             time_val = text.strip()
-            # Enforce HH:MM format with hours 00-23 and minutes 00-59, support single hour digit padding
             match = re.match(r"^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$", time_val)
             if not match:
                 cancel_btn = "/back_to_summary" if edit_mode else "/cancel_wizard"
@@ -283,7 +290,7 @@ class CreatePassScene:
             hour = int(match.group(1))
             minute = int(match.group(2))
             wizard_data["visit_time"] = f"{hour:02d}:{minute:02d}"
-            
+
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
@@ -300,9 +307,9 @@ class CreatePassScene:
                 )
 
         elif step == "visit_zone":
-            from scenes.custom_fields_mgmt import CAMPUSES
+            zones = database.get_zones()
             zone_val = text.strip()
-            if zone_val not in CAMPUSES:
+            if zone_val not in zones:
                 cancel_btn = "/back_to_summary" if edit_mode else "/cancel_wizard"
                 btn_text = "❌ Назад к сводке" if edit_mode else "❌ Отменить"
                 await n.reply_with_keyboard(
@@ -312,9 +319,9 @@ class CreatePassScene:
                     self.get_zone_buttons() + [[{"type": "callback", "text": btn_text, "payload": cancel_btn}]]
                 )
                 return
-            
+
             wizard_data["visit_zone"] = zone_val
-            
+
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
@@ -345,7 +352,7 @@ class CreatePassScene:
                 return
 
             wizard_data["visit_purpose"] = purpose_val
-            
+
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
@@ -380,10 +387,10 @@ class CreatePassScene:
             field_id = int(step.split("_")[1])
             custom_fields_to_ask = state_data["custom_fields_to_ask"]
             current_idx = state_data["current_cf_idx"]
-            
+
             f_def = database.get_custom_field(field_id)
             val = text.strip()
-            
+
             if f_def:
                 if f_def["is_required"] and not val:
                     buttons = [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
@@ -394,11 +401,11 @@ class CreatePassScene:
                         buttons
                     )
                     return
-                
+
                 if "custom_fields" not in wizard_data:
                     wizard_data["custom_fields"] = {}
                 wizard_data["custom_fields"][f_def["field_name"]] = val
-                
+
             next_idx = current_idx + 1
             if next_idx < len(custom_fields_to_ask):
                 next_field_id = custom_fields_to_ask[next_idx]
@@ -432,11 +439,11 @@ class CreatePassScene:
             f"🚪 **Зона посещения:** {data['visit_zone']}\n"
             f"🎯 **Цель визита:** {data['visit_purpose']}\n"
         )
-        
+
         custom_fields = data.get("custom_fields", {})
         for name, val in custom_fields.items():
             summary_text += f"📋 **{name}:** {val}\n"
-            
+
         summary_text += "\nПожалуйста, проверьте все данные. Для редактирования нажмите соответствующую кнопку."
 
         buttons = [
@@ -455,7 +462,7 @@ class CreatePassScene:
                 {"type": "callback", "text": "🎯 Изменить Цель", "payload": "/edit_visit_purpose"}
             ]
         ]
-        
+
         custom_edit_row = []
         for name in custom_fields.keys():
             custom_edit_row.append({"type": "callback", "text": f"✏️ {name}", "payload": f"/edit_cf_{name}"})
@@ -464,10 +471,36 @@ class CreatePassScene:
                 custom_edit_row = []
         if custom_edit_row:
             buttons.append(custom_edit_row)
-            
+
         buttons.append([{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}])
 
         await n.reply_with_keyboard(summary_text, "markdown", buttons)
+
+    async def _notify_admins_new_request(self, n, req_id: int, wizard_data: dict):
+        """Notify all admins about a newly submitted request (Task 2.1)."""
+        admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
+        if not admin_ids:
+            return
+
+        queue = database.get_admin_queue()
+        queue_size = len(queue)
+
+        notify_text = (
+            f"🔔 **Новая заявка на пропуск №{req_id}!**\n\n"
+            f"👤 Гость: {wizard_data['visitor_name']}\n"
+            f"📅 Дата визита: {wizard_data['visit_date']}\n"
+            f"🕒 Время визита: {wizard_data['visit_time']}\n"
+            f"🚪 Корпус/Зона: {wizard_data['visit_zone']}\n"
+            f"🎯 Цель визита: {wizard_data['visit_purpose']}"
+        )
+
+        if queue_size >= QUEUE_ALERT_THRESHOLD:
+            notify_text += (
+                f"\n\n⚠️ **Внимание!** В очереди накопилось **{queue_size}** заявок, "
+                f"ожидающих рассмотрения."
+            )
+
+        await notifications.notify_admins(n, admin_ids, notify_text)
 
     def get_date_buttons(self):
         return [
@@ -493,5 +526,5 @@ class CreatePassScene:
         ]
 
     def get_zone_buttons(self):
-        from scenes.custom_fields_mgmt import CAMPUSES
-        return [[{"type": "callback", "text": c, "payload": c}] for c in CAMPUSES]
+        zones = database.get_zones()
+        return [[{"type": "callback", "text": z, "payload": z}] for z in zones]

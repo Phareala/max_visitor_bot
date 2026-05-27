@@ -4,6 +4,17 @@ from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visitor_passes.db")
 
+# Default zones list (used to seed the DB on first startup)
+DEFAULT_ZONES = [
+    "Проспект Вернадского, 78 (Главный кампус)",
+    "Проспект Вернадского, 86 (Альтаир / ИТХТ)",
+    "Улица Стромынка, 20",
+    "Улица Малая Пироговская, 1",
+    "5-я улица Соколиной Горы, 22",
+    "1-й Щипковский переулок, 23 (КПК)",
+    "Улица Усачёва, 7/1 (ВУЦ)"
+]
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -23,7 +34,7 @@ def init_db():
                 consent_version TEXT
             )
         """)
-        
+
         # Create requests table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS requests (
@@ -42,7 +53,16 @@ def init_db():
                 created_at TEXT
             )
         """)
-        
+
+        # Add expire_notified column to requests if it doesn't exist
+        # Default = 1 means "already notified" for all existing rows,
+        # new expirations will be set to 0 explicitly
+        try:
+            conn.execute("ALTER TABLE requests ADD COLUMN expire_notified INTEGER DEFAULT 1")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+
         # Create audit_log table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -56,7 +76,7 @@ def init_db():
                 comment TEXT
             )
         """)
-        
+
         # Create custom_fields table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS custom_fields (
@@ -68,7 +88,7 @@ def init_db():
                 created_at TEXT
             )
         """)
-        
+
         # Create request_custom_fields table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS request_custom_fields (
@@ -79,7 +99,30 @@ def init_db():
                 FOREIGN KEY (request_id) REFERENCES requests(request_id) ON DELETE CASCADE
             )
         """)
+
+        # Create zones table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS zones (
+                zone_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                zone_name TEXT UNIQUE NOT NULL,
+                display_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+        """)
+
         conn.commit()
+
+        # Seed default zones if table is empty
+        count = conn.execute("SELECT COUNT(*) FROM zones").fetchone()[0]
+        if count == 0:
+            now = datetime.now().isoformat()
+            for idx, zone_name in enumerate(DEFAULT_ZONES):
+                conn.execute(
+                    "INSERT OR IGNORE INTO zones (zone_name, display_order, is_active, created_at) VALUES (?, ?, 1, ?)",
+                    (zone_name, idx, now)
+                )
+            conn.commit()
 
 # --- User Management ---
 
@@ -95,7 +138,7 @@ def get_user_role(user_id, default_admin_ids, default_tech_admin_ids):
         return "tech_admin"
     if user_id_str in default_admin_ids:
         return "admin"
-    
+
     # Otherwise check database
     user = get_user(user_id_str)
     if user:
@@ -128,7 +171,7 @@ def give_consent(user_id, display_name, role="initiator", version="1.0"):
                 consent_version = excluded.consent_version
         """, (user_id_str, display_name, role, now, version))
         conn.commit()
-    
+
     # Log consent acceptance in audit log (use request_id = 0 for user actions not linked to requests)
     log_audit_event(0, "consent_accepted", user_id_str, None, None, f"Consent version {version} accepted")
 
@@ -136,7 +179,7 @@ def delete_user_data(user_id):
     user_id_str = str(user_id)
     # Log audit event for data deletion BEFORE deleting
     log_audit_event(0, "user_data_deleted", user_id_str, None, None, "User requested complete data deletion")
-    
+
     with get_db_connection() as conn:
         # Delete request custom fields first
         conn.execute("""
@@ -162,7 +205,7 @@ def create_request(initiator_id, visitor_name, visit_date, visit_time, visit_zon
         """, (initiator_id_str, visitor_name, visit_date, visit_time, visit_zone, visit_purpose, now))
         request_id = cursor.lastrowid
         conn.commit()
-    
+
     log_audit_event(request_id, "request_created", initiator_id_str, None, "draft")
     return request_id
 
@@ -171,9 +214,9 @@ def update_request_status(request_id, new_status, performer_id, comment=None, re
     req = get_request(request_id)
     if not req:
         return False
-    
+
     old_status = req["status"]
-    
+
     with get_db_connection() as conn:
         if new_status == "rejected":
             conn.execute("""
@@ -194,7 +237,7 @@ def update_request_status(request_id, new_status, performer_id, comment=None, re
                 WHERE request_id = ?
             """, (new_status, request_id))
         conn.commit()
-    
+
     log_audit_event(request_id, "status_changed", performer_id_str, old_status, new_status, comment or rejection_reason)
     return True
 
@@ -232,7 +275,7 @@ def set_clarification_question(request_id, question, performer_id):
     req = get_request(request_id)
     if not req:
         return False
-    
+
     old_status = req["status"]
     with get_db_connection() as conn:
         conn.execute("""
@@ -241,7 +284,7 @@ def set_clarification_question(request_id, question, performer_id):
             WHERE request_id = ?
         """, (question, request_id))
         conn.commit()
-    
+
     log_audit_event(request_id, "clarification_requested", performer_id_str, old_status, "clarification", question)
     return True
 
@@ -250,7 +293,7 @@ def submit_clarification_answer(request_id, answer, performer_id):
     req = get_request(request_id)
     if not req:
         return False
-    
+
     old_status = req["status"]
     with get_db_connection() as conn:
         conn.execute("""
@@ -259,7 +302,7 @@ def submit_clarification_answer(request_id, answer, performer_id):
             WHERE request_id = ?
         """, (answer, request_id))
         conn.commit()
-    
+
     log_audit_event(request_id, "clarification_answered", performer_id_str, old_status, "review", answer)
     return True
 
@@ -296,12 +339,12 @@ def get_system_stats():
     with get_db_connection() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         request_count = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
-        
+
         status_rows = conn.execute("SELECT status, COUNT(*) FROM requests GROUP BY status").fetchall()
         status_stats = {r[0]: r[1] for r in status_rows}
-        
+
         consent_count = conn.execute("SELECT COUNT(*) FROM users WHERE consent_given = 1").fetchone()[0]
-        
+
         return {
             "total_users": user_count,
             "total_requests": request_count,
@@ -373,39 +416,145 @@ def get_request_custom_fields(request_id):
         """, (request_id,)).fetchall()
         return {r["field_name"]: r["field_value"] for r in rows}
 
-# --- Auto Expiration & Period-based Statistics ---
+# --- Zones Management ---
 
-def auto_expire_requests():
-    now = datetime.now()
+def get_zones():
+    """Return list of active zone name strings, ordered by display_order."""
     with get_db_connection() as conn:
         rows = conn.execute("""
-            SELECT request_id, visit_date, visit_time, status
+            SELECT zone_name FROM zones
+            WHERE is_active = 1
+            ORDER BY display_order ASC, zone_id ASC
+        """).fetchall()
+        return [r["zone_name"] for r in rows]
+
+def get_zones_with_ids():
+    """Return list of zone dicts {zone_id, zone_name, display_order, is_active}."""
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT zone_id, zone_name, display_order, is_active FROM zones
+            ORDER BY display_order ASC, zone_id ASC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+def get_zone(zone_id):
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT * FROM zones WHERE zone_id = ?", (zone_id,)).fetchone()
+        return dict(row) if row else None
+
+def add_zone(zone_name):
+    """Add a new active zone. Returns zone_id or None if name already exists."""
+    now = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        # Compute next display_order
+        max_order = conn.execute("SELECT MAX(display_order) FROM zones").fetchone()[0]
+        next_order = (max_order or 0) + 1
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO zones (zone_name, display_order, is_active, created_at) VALUES (?, ?, 1, ?)",
+                (zone_name.strip(), next_order, now)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except Exception:
+            return None  # Duplicate name
+
+def delete_zone(zone_id):
+    """Delete a zone by ID."""
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM zones WHERE zone_id = ?", (zone_id,))
+        conn.commit()
+
+def rename_zone(zone_id, new_name):
+    """Rename a zone and update custom_fields zone_name references. Returns True on success."""
+    zone = get_zone(zone_id)
+    if not zone:
+        return False
+    old_name = zone["zone_name"]
+    new_name = new_name.strip()
+    with get_db_connection() as conn:
+        try:
+            conn.execute("UPDATE zones SET zone_name = ? WHERE zone_id = ?", (new_name, zone_id))
+            # Also update custom_fields references
+            conn.execute("UPDATE custom_fields SET zone_name = ? WHERE zone_name = ?", (new_name, old_name))
+            conn.commit()
+            return True
+        except Exception:
+            return False  # Duplicate name
+
+# --- Auto Expiration & Expiry Notifications ---
+
+def auto_expire_requests():
+    """Expire requests past their visit date/time. Returns list of newly expired request dicts."""
+    now = datetime.now()
+    newly_expired = []
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT request_id, visit_date, visit_time, status, initiator_id, visitor_name, visit_zone
             FROM requests
             WHERE status IN ('draft', 'review', 'clarification')
         """).fetchall()
-        
+
         expired_ids = []
         for row in rows:
             try:
                 visit_dt = datetime.strptime(f"{row['visit_date']} {row['visit_time']}", "%d.%m.%Y %H:%M")
                 if visit_dt < now:
-                    expired_ids.append((row['request_id'], row['status']))
+                    expired_ids.append(dict(row))
             except Exception:
                 pass
-        
+
         if expired_ids:
-            for req_id, old_status in expired_ids:
+            for req in expired_ids:
+                req_id = req["request_id"]
+                old_status = req["status"]
                 conn.execute("""
                     UPDATE requests
-                    SET status = 'expired'
+                    SET status = 'expired', expire_notified = 0
                     WHERE request_id = ?
                 """, (req_id,))
-                
+
                 conn.execute("""
                     INSERT INTO audit_log (request_id, event_type, event_time, performer_id, old_status, new_status, comment)
                     VALUES (?, 'status_changed', ?, 'system', ?, 'expired', 'Автоматическое закрытие по истечению срока действия')
                 """, (req_id, now.isoformat(), old_status))
+
+                newly_expired.append({
+                    "request_id": req_id,
+                    "initiator_id": req["initiator_id"],
+                    "visitor_name": req["visitor_name"],
+                    "visit_date": req["visit_date"],
+                    "visit_time": req["visit_time"],
+                    "visit_zone": req["visit_zone"]
+                })
             conn.commit()
+
+    return newly_expired
+
+def get_unnotified_expired():
+    """Return list of expired requests that haven't sent a notification yet."""
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT request_id, initiator_id, visitor_name, visit_date, visit_time, visit_zone
+            FROM requests
+            WHERE status = 'expired' AND expire_notified = 0
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+def mark_expire_notified(request_ids):
+    """Mark a list of request IDs as having sent expiry notifications."""
+    if not request_ids:
+        return
+    with get_db_connection() as conn:
+        placeholders = ",".join("?" * len(request_ids))
+        conn.execute(
+            f"UPDATE requests SET expire_notified = 1 WHERE request_id IN ({placeholders})",
+            request_ids
+        )
+        conn.commit()
+
+# --- Period-based Statistics ---
 
 def get_period_stats(days=None):
     with get_db_connection() as conn:
@@ -418,31 +567,31 @@ def get_period_stats(days=None):
         else:
             query_filter = ""
             params = ()
-            
+
         if days is not None:
             user_count = conn.execute("SELECT COUNT(*) FROM users WHERE consent_time >= ?", params).fetchone()[0]
         else:
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            
+
         req_count = conn.execute(f"SELECT COUNT(*) FROM requests {query_filter}", params).fetchone()[0]
-        
+
         status_rows = conn.execute(f"""
-            SELECT status, COUNT(*) 
-            FROM requests 
+            SELECT status, COUNT(*)
+            FROM requests
             {query_filter}
             GROUP BY status
         """, params).fetchall()
         status_stats = {r[0]: r[1] for r in status_rows}
-        
+
         campus_rows = conn.execute(f"""
-            SELECT visit_zone, COUNT(*) 
-            FROM requests 
+            SELECT visit_zone, COUNT(*)
+            FROM requests
             {query_filter}
             GROUP BY visit_zone
             ORDER BY COUNT(*) DESC
         """, params).fetchall()
         campus_stats = {r[0]: r[1] for r in campus_rows}
-        
+
         return {
             "total_users": user_count,
             "total_requests": req_count,
@@ -458,7 +607,7 @@ def get_all_requests_for_export():
             LEFT JOIN users u ON r.initiator_id = u.user_id
             ORDER BY r.request_id ASC
         """).fetchall()
-        
+
         requests_list = []
         for r in rows:
             req_dict = dict(r)

@@ -1,5 +1,6 @@
 import os
 import database
+import notifications
 from maxbot_api_client_python.types import models
 
 STATUS_MAP = {
@@ -13,11 +14,15 @@ STATUS_MAP = {
     "expired": "Просрочена ⏳"
 }
 
+
 class UserRequestsScene:
     async def start(self, app):
         pass
 
     async def show_user_requests(self, n, idx=0):
+        # Send expiry notifications for any newly expired requests (Task 2.2)
+        await notifications.send_expiry_notifications(n)
+
         user_id = str(n.sender_id())
         user_requests = database.get_user_requests(user_id)
         total = len(user_requests)
@@ -34,7 +39,7 @@ class UserRequestsScene:
             idx = total - 1
 
         req = user_requests[idx]
-        
+
         n.state_manager.update_state_data(n.state_id, {
             "step": "browsing",
             "idx": idx,
@@ -58,7 +63,7 @@ class UserRequestsScene:
         )
         if cf_text:
             card_text += cf_text
-            
+
         card_text += f"🏷️ **Статус:** {status_text}\n"
 
         if req["status"] == "clarification":
@@ -78,7 +83,7 @@ class UserRequestsScene:
         # Cancel button (available before final decision)
         if req["status"] in ["draft", "review", "clarification"]:
             action_row.append({"type": "callback", "text": "❌ Отменить заявку", "payload": f"/user_cancel_{req['request_id']}"})
-        
+
         # Clarification answer button
         if req["status"] == "clarification":
             action_row.append({"type": "callback", "text": "✍️ Ответить", "payload": f"/user_reply_prompt_{req['request_id']}"})
@@ -87,7 +92,7 @@ class UserRequestsScene:
         admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
         tech_admin_ids = [x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()]
         role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
-        
+
         if role in ["admin", "tech_admin"] and req["status"] in ["approved", "rejected"]:
             action_row.append({"type": "callback", "text": "🔒 Закрыть заявку", "payload": f"/user_close_{req['request_id']}"})
 
@@ -100,7 +105,7 @@ class UserRequestsScene:
             nav_row.append({"type": "callback", "text": "◀️ Предыдущая", "payload": "/user_prev"})
         if idx < total - 1:
             nav_row.append({"type": "callback", "text": "▶️ Следующая", "payload": "/user_next"})
-        
+
         if nav_row:
             buttons.append(nav_row)
 
@@ -170,11 +175,11 @@ class UserRequestsScene:
             req_id = int(text.split("_")[2])
             req = database.get_request(req_id)
             user_id = str(n.sender_id())
-            
+
             admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
             tech_admin_ids = [x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()]
             role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
-            
+
             if role in ["admin", "tech_admin"]:
                 if req and req["status"] in ["approved", "rejected"]:
                     database.update_request_status(req_id, "closed", user_id, "Закрыто администратором")
@@ -194,7 +199,7 @@ class UserRequestsScene:
                 "target_req_id": req_id,
                 "idx": idx
             })
-            
+
             buttons = [[{"type": "callback", "text": "❌ Отмена", "payload": "/my_requests"}]]
             await n.reply_with_keyboard(
                 f"✍️ **Ответ на уточнение по заявке #{req_id}**\n\n"
@@ -209,12 +214,12 @@ class UserRequestsScene:
             req_id = state_data["target_req_id"]
             user_id = str(n.sender_id())
             answer_text = text.strip()
-            
+
             req = database.get_request(req_id)
             if req:
                 database.submit_clarification_answer(req_id, answer_text, user_id)
                 await n.reply("✅ Ваш ответ успешно отправлен. Заявка возвращена на рассмотрение в службу безопасности.")
-                
+
                 # Notify administrators
                 admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
                 notify_text = (
@@ -223,23 +228,10 @@ class UserRequestsScene:
                     f"• Ответ инициатора:\n"
                     f"_{answer_text}_"
                 )
-                for admin_id in admin_ids:
-                    await self.send_user_notification(n, admin_id, notify_text)
-            
+                await notifications.notify_admins(n, admin_ids, notify_text)
+
             await self.show_user_requests(n, idx)
             return
 
         await n.reply("Неизвестное действие. Используйте кнопки для управления заявками.")
         await self.show_user_requests(n, idx)
-
-    async def send_user_notification(self, n, target_user_id, text):
-        try:
-            req = models.SendMessageReq(
-                user_id=int(target_user_id),
-                text=text,
-                format="markdown"
-            )
-            await n.bot.api.messages.send_message_async(req)
-        except Exception as e:
-            # Silence notification errors
-            print(f"Error sending notification to {target_user_id}: {e}")

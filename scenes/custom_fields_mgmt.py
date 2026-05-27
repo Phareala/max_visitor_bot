@@ -2,15 +2,17 @@ import os
 import database
 from maxbot_api_client_python import utils
 
-CAMPUSES = [
-    "Проспект Вернадского, 78 (Главный кампус / Альтаир)",
-    "Проспект Вернадского, 86 (ИТХТ)",
-    "Улица Стромынка, 20",
-    "Улица Малая Пироговская, 1",
-    "5-я улица Соколиной Горы, 22",
-    "1-й Щипковский переулок, 23 (КПК)",
-    "Улица Усачёва, 7/1 (ВУЦ)"
-]
+# Kept for reference / seed data only — runtime uses database.get_zones()
+DEFAULT_ZONES = database.DEFAULT_ZONES
+
+# Backward-compat alias used in a few places that import CAMPUSES
+def get_campuses():
+    """Return current active zones from the database."""
+    return database.get_zones()
+
+# Module-level CAMPUSES is kept for any legacy imports; refreshed each call via get_campuses()
+CAMPUSES = DEFAULT_ZONES  # initial fallback; scenes should call database.get_zones() directly
+
 
 class CustomFieldsMgmtScene:
     async def start(self, app):
@@ -20,12 +22,13 @@ class CustomFieldsMgmtScene:
         n.state_manager.update_state_data(n.state_id, {
             "step": "choose_zone"
         })
+        campuses = database.get_zones()
         buttons = []
-        for campus in CAMPUSES:
+        for campus in campuses:
             buttons.append([{"type": "callback", "text": campus, "payload": f"/cf_zone_{campus}"}])
         buttons.append([{"type": "callback", "text": "🌐 Все корпуса", "payload": "/cf_zone_Все корпуса"}])
         buttons.append([{"type": "callback", "text": "◀️ В меню", "payload": "/menu"}])
-        
+
         await n.reply_with_keyboard(
             "⚙️ **Настройка кастомных полей**\n\n"
             "Выберите зону посещения (корпус) для настройки дополнительных полей заявок:",
@@ -39,7 +42,7 @@ class CustomFieldsMgmtScene:
             "zone_name": zone_name
         })
         fields = database.get_custom_fields_by_zone_exact(zone_name)
-        
+
         text = f"⚙️ **Настройка полей для: {zone_name}**\n\n"
         if not fields:
             text += "Для этого корпуса пока нет кастомных полей."
@@ -50,14 +53,14 @@ class CustomFieldsMgmtScene:
                 text += f"{i}. **{f['field_name']}** ({req_text})\n"
                 if f["description"]:
                     text += f"   _Подсказка:_ {f['description']}\n"
-                    
+
         buttons = []
         for f in fields:
             buttons.append([{"type": "callback", "text": f"🗑 Удалить '{f['field_name']}'", "payload": f"/cf_del_{f['field_id']}"}])
-            
+
         buttons.append([{"type": "callback", "text": "➕ Добавить поле", "payload": "/cf_add"}])
         buttons.append([{"type": "callback", "text": "◀️ Назад к выбору зон", "payload": "/cf_back"}])
-        
+
         await n.reply_with_keyboard(text, "markdown", buttons)
 
     async def execute(self, n):
@@ -143,12 +146,12 @@ class CustomFieldsMgmtScene:
             if text == "/cf_cancel_add":
                 await self.show_zone_menu(n, zone_name)
                 return
-            
+
             field_name = text.strip()
             if not field_name or len(field_name) < 2:
                 await n.reply("❌ Название поля слишком короткое. Введите другое название:")
                 return
-                
+
             n.state_manager.update_state_data(n.state_id, {
                 "step": "add_field_desc",
                 "new_field_name": field_name,
@@ -167,12 +170,12 @@ class CustomFieldsMgmtScene:
             if text == "/cf_cancel_add":
                 await self.show_zone_menu(n, zone_name)
                 return
-                
+
             field_desc = text.strip()
             if not field_desc or len(field_desc) < 3:
                 await n.reply("❌ Подсказка слишком короткая. Введите другую подсказку:")
                 return
-                
+
             n.state_manager.update_state_data(n.state_id, {
                 "step": "add_field_req",
                 "new_field_desc": field_desc,
@@ -199,12 +202,12 @@ class CustomFieldsMgmtScene:
             if text == "/cf_cancel_add":
                 await self.show_zone_menu(n, zone_name)
                 return
-                
+
             if text.startswith("/cf_req_"):
                 is_req = int(text.split("_")[2])
                 field_name = state_data["new_field_name"]
                 field_desc = state_data["new_field_desc"]
-                
+
                 database.add_custom_field(zone_name, field_name, is_req, field_desc)
                 await n.reply(f"✅ Поле **{field_name}** успешно добавлено для {zone_name}.")
                 await self.show_zone_menu(n, zone_name)

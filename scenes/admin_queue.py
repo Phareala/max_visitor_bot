@@ -1,15 +1,20 @@
 import os
 import database
+import notifications
 from maxbot_api_client_python.types import models
+
 
 class AdminQueueScene:
     async def start(self, app):
         pass
 
     async def show_queue(self, n, idx=0):
+        # Send expiry notifications before displaying queue (Task 2.2)
+        await notifications.send_expiry_notifications(n)
+
         queue = database.get_admin_queue()
         total = len(queue)
-        
+
         if total == 0:
             n.state_manager.update_state_data(n.state_id, {"step": "idle"})
             buttons = [[{"type": "callback", "text": "◀️ В меню", "payload": "/menu"}]]
@@ -23,7 +28,7 @@ class AdminQueueScene:
             idx = total - 1
 
         req = queue[idx]
-        
+
         n.state_manager.update_state_data(n.state_id, {
             "step": "browsing",
             "idx": idx,
@@ -46,7 +51,7 @@ class AdminQueueScene:
         )
         if cf_text:
             card_text += cf_text
-            
+
         card_text += f"👤 **Инициатор:** {req['initiator_name'] or 'Неизвестно'} (ID: {req['initiator_id']})"
 
         buttons = [
@@ -65,7 +70,7 @@ class AdminQueueScene:
             nav_row.append({"type": "callback", "text": "◀️ Предыдущая", "payload": "/admin_prev"})
         if idx < total - 1:
             nav_row.append({"type": "callback", "text": "▶️ Следующая", "payload": "/admin_next"})
-        
+
         if nav_row:
             buttons.append(nav_row)
 
@@ -125,17 +130,17 @@ class AdminQueueScene:
                 admin_id = str(n.sender_id())
                 database.update_request_status(req_id, "approved", admin_id, "Согласовано администратором")
                 await n.reply(f"✅ Заявка `#{req_id}` успешно согласована.")
-                
+
                 # Notify initiator
                 notify_text = (
-                    f"🔔 **Ваша заявка №{req_id} одобрена!**\n\n"
+                    f"✅ **Ваша заявка №{req_id} одобрена!**\n\n"
                     f"👤 Гость: {req['visitor_name']}\n"
                     f"📅 Дата визита: {req['visit_date']}\n"
                     f"🕒 Время визита: {req['visit_time']}\n"
                     f"🚪 Корпус/Зона: {req['visit_zone']}"
                 )
-                await self.send_user_notification(n, req["initiator_id"], notify_text)
-            
+                await notifications.send_notification(n, req["initiator_id"], notify_text)
+
             await self.show_queue(n, idx)
             return
 
@@ -146,16 +151,16 @@ class AdminQueueScene:
                 "step": "reject_reason",
                 "target_req_id": req_id
             })
-            
+
             reasons = [
                 {"type": "callback", "text": "❓ Цель визита не ясна", "payload": f"/admin_reject_reason_{req_id}_1"},
                 {"type": "callback", "text": "🚪 Указанная зона закрыта", "payload": f"/admin_reject_reason_{req_id}_2"},
                 {"type": "callback", "text": "❌ Введены некорректные данные", "payload": f"/admin_reject_reason_{req_id}_3"}
             ]
-            
+
             buttons = [[r] for r in reasons]
             buttons.append([{"type": "callback", "text": "❌ Отмена", "payload": "/admin_queue"}])
-            
+
             await n.reply_with_keyboard(
                 f"❌ **Отклонение заявки #{req_id}**\n\nПожалуйста, выберите причину отказа из списка:",
                 "markdown",
@@ -168,20 +173,20 @@ class AdminQueueScene:
             parts = text.split("_")
             req_id = int(parts[3])
             reason_idx = int(parts[4])
-            
+
             reasons_map = {
                 1: "Цель визита не ясна",
                 2: "Указанная зона закрыта для посещения",
                 3: "Введены некорректные данные в заявке"
             }
             reason = reasons_map.get(reason_idx, "Другая причина")
-            
+
             n.state_manager.update_state_data(n.state_id, {
                 "step": "reject_comment",
                 "target_req_id": req_id,
                 "reason": reason
             })
-            
+
             buttons = [[{"type": "callback", "text": "⏭️ Пропустить комментарий", "payload": "/admin_reject_skip_comment"}]]
             await n.reply_with_keyboard(
                 "✍️ Вы можете ввести краткий комментарий к отказу (или нажать кнопку ниже, чтобы пропустить):",
@@ -195,24 +200,26 @@ class AdminQueueScene:
             req_id = state_data["target_req_id"]
             reason = state_data["reason"]
             admin_id = str(n.sender_id())
-            
+
             comment = None
             if text != "/admin_reject_skip_comment":
                 comment = text.strip()
-                
+
             database.update_request_status(req_id, "rejected", admin_id, comment, reason)
             await n.reply(f"❌ Заявка `#{req_id}` отклонена.")
-            
-            # Notify initiator
-            notify_text = (
-                f"🔕 **Ваша заявка №{req_id} отклонена.**\n\n"
-                f"• Причина: {reason}\n"
-            )
-            if comment:
-                notify_text += f"• Комментарий: {comment}"
-                
-            await self.send_user_notification(n, state_data["target_req_id"], notify_text)
-            
+
+            req = database.get_request(req_id)
+            if req:
+                # Notify initiator
+                notify_text = (
+                    f"❌ **Ваша заявка №{req_id} отклонена.**\n\n"
+                    f"• Причина: {reason}\n"
+                )
+                if comment:
+                    notify_text += f"• Комментарий: {comment}"
+
+                await notifications.send_notification(n, req["initiator_id"], notify_text)
+
             await self.show_queue(n, idx)
             return
 
@@ -223,7 +230,7 @@ class AdminQueueScene:
                 "step": "clarification_question",
                 "target_req_id": req_id
             })
-            
+
             buttons = [[{"type": "callback", "text": "❌ Отмена", "payload": "/admin_queue"}]]
             await n.reply_with_keyboard(
                 f"❓ **Запрос уточнения по заявке #{req_id}**\n\n"
@@ -238,12 +245,12 @@ class AdminQueueScene:
             req_id = state_data["target_req_id"]
             admin_id = str(n.sender_id())
             question_text = text.strip()
-            
+
             req = database.get_request(req_id)
             if req:
                 database.set_clarification_question(req_id, question_text, admin_id)
                 await n.reply(f"📨 Запрос уточнения отправлен инициатору заявки `#{req_id}`.")
-                
+
                 # Notify initiator
                 notify_text = (
                     f"⚠️ **По вашей заявке №{req_id} требуется уточнение.**\n\n"
@@ -251,22 +258,10 @@ class AdminQueueScene:
                     f"_{question_text}_\n\n"
                     f"Пожалуйста, ответьте на это сообщение, чтобы вернуть заявку на рассмотрение."
                 )
-                await self.send_user_notification(n, req["initiator_id"], notify_text)
-            
+                await notifications.send_notification(n, req["initiator_id"], notify_text)
+
             await self.show_queue(n, idx)
             return
 
         await n.reply("Неизвестное действие. Используйте кнопки для управления очередью.")
         await self.show_queue(n, idx)
-
-    async def send_user_notification(self, n, target_user_id, text):
-        try:
-            req = models.SendMessageReq(
-                user_id=int(target_user_id),
-                text=text,
-                format="markdown"
-            )
-            await n.bot.api.messages.send_message_async(req)
-        except Exception as e:
-            # Silence error or print for diagnostics (avoid blocking bot execution)
-            print(f"Error sending notification to {target_user_id}: {e}")

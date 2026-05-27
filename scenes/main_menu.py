@@ -34,7 +34,7 @@ class MainMenuScene:
                 else:
                     await n.reply("⛔ Доступ ограничен. Вы не можете создавать заявки.")
                     await self.send_main_menu(n)
-                
+
             case "/my_requests":
                 if role == "initiator":
                     from scenes.user_requests import UserRequestsScene
@@ -132,7 +132,7 @@ class MainMenuScene:
                         365: "за год",
                         None: "за всё время"
                     }[days]
-                    
+
                     stats = database.get_period_stats(days)
                     stats_msg = (
                         f"📊 **Статистика системы {period_label}**\n\n"
@@ -140,7 +140,7 @@ class MainMenuScene:
                         f"📝 Всего создано заявок: `{stats['total_requests']}`\n\n"
                         f"📈 **Статусы заявок:**\n"
                     )
-                    
+
                     total_reqs = stats['total_requests']
                     STATUS_MAP_LOCAL = {
                         "draft": "Черновик 📝",
@@ -152,7 +152,7 @@ class MainMenuScene:
                         "canceled": "Отменена 🔕",
                         "expired": "Просрочена ⏳"
                     }
-                    
+
                     if total_reqs > 0:
                         for st, name in STATUS_MAP_LOCAL.items():
                             count = stats["status_stats"].get(st, 0)
@@ -162,7 +162,7 @@ class MainMenuScene:
                             stats_msg += f"- {name}: `{count}` ({pct:.1f}%)\n  `{bar}`\n"
                     else:
                         stats_msg += "Заявок за этот период нет.\n"
-                        
+
                     stats_msg += f"\n🚪 **Популярность корпусов:**\n"
                     if total_reqs > 0 and stats["campus_stats"]:
                         for campus, count in stats["campus_stats"].items():
@@ -173,7 +173,7 @@ class MainMenuScene:
                             stats_msg += f"- *{short_campus}*: `{count}` ({pct:.1f}%)\n  `{bar}`\n"
                     else:
                         stats_msg += "Данные о корпусах отсутствуют.\n"
-                        
+
                     buttons = [
                         [{"type": "callback", "text": "◀️ Выбор периода", "payload": "/tech_stats"}],
                         [{"type": "callback", "text": "◀️ Главное меню", "payload": "/menu"}]
@@ -199,11 +199,11 @@ class MainMenuScene:
                         return
 
                     output = io.StringIO()
-                    output.write('\ufeff')  # UTF-8 BOM
+                    output.write('﻿')  # UTF-8 BOM
                     writer = csv.writer(output, delimiter=';')
                     writer.writerow([
-                        "ID заявки", "ID инициатора", "ФИО инициатора", "ФИО гостя", 
-                        "Дата визита", "Время визита", "Корпус / Зона", "Цель визита", 
+                        "ID заявки", "ID инициатора", "ФИО инициатора", "ФИО гостя",
+                        "Дата визита", "Время визита", "Корпус / Зона", "Цель визита",
                         "Статус", "Комментарий ИБ", "Причина отказа", "Создана в", "Дополнительные поля"
                     ])
 
@@ -225,7 +225,7 @@ class MainMenuScene:
                         try:
                             upload_resp = await n.bot.api.uploads.get_upload_url_async(UploadType.FILE)
                             uploaded_info = await n.bot.api.uploads.upload_multipart_async(upload_resp.url, temp_path)
-                            
+
                             if uploaded_info and uploaded_info.token:
                                 req = SendMessageReq(
                                     user_id=int(n.sender_id()),
@@ -251,7 +251,7 @@ class MainMenuScene:
                         preview_csv = csv_content[:1500]
                         if len(csv_content) > 1500:
                             preview_csv += "\n... [остальные строки обрезаны]"
-                        
+
                         await n.reply_with_keyboard(
                             "⚠️ Не удалось отправить файл из-за ошибки. Превью данных:\n\n"
                             f"```csv\n{preview_csv}\n```",
@@ -272,6 +272,16 @@ class MainMenuScene:
                     await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
                     await self.send_main_menu(n)
 
+            case "/zones_mgmt":
+                if role == "tech_admin":
+                    from scenes.zones_mgmt import ZonesMgmtScene
+                    next_scene = ZonesMgmtScene()
+                    n.activate_next_scene(next_scene)
+                    await next_scene.show_zones_list(n)
+                else:
+                    await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
+                    await self.send_main_menu(n)
+
             case "/tech_logs":
                 if role == "tech_admin":
                     logs = database.get_audit_logs()
@@ -282,7 +292,7 @@ class MainMenuScene:
                         log_msg += f"• `{time_str}` [{req_id_str}] | *{log['event_type']}* | роль: {log['new_status'] or '-'}\n"
                         if log['comment']:
                             log_msg += f"  _Детали:_ {log['comment'][:40]}\n"
-                    
+
                     buttons = [[{"type": "callback", "text": "◀️ В меню", "payload": "/menu"}]]
                     await n.reply_with_keyboard(log_msg, "markdown", buttons)
                 else:
@@ -303,15 +313,20 @@ class MainMenuScene:
         role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
 
         if role == "admin":
+            # Show queue size in the admin panel header
+            queue = database.get_admin_queue()
+            queue_size = len(queue)
+            queue_hint = f" (`{queue_size}` в очереди)" if queue_size > 0 else ""
             text = (
-                "🛡️ **Панель Администратора ИБ**\n\n"
-                "Добро пожаловать! Вам доступны функции управления заявками на пропуск."
+                f"🛡️ **Панель Администратора ИБ**\n\n"
+                f"Добро пожаловать! Вам доступны функции управления заявками на пропуск.{queue_hint}"
             )
             buttons = [
                 [
-                    {"type": "callback", "text": "📥 Очередь заявок", "payload": "/admin_queue"}
+                    {"type": "callback", "text": f"📥 Очередь заявок{(' (' + str(queue_size) + ')') if queue_size else ''}", "payload": "/admin_queue"}
                 ]
             ]
+
         elif role == "tech_admin":
             text = (
                 "⚙️ **Панель Технического Администратора**\n\n"
@@ -323,7 +338,8 @@ class MainMenuScene:
                     {"type": "callback", "text": "📋 Журнал событий", "payload": "/tech_logs"}
                 ],
                 [
-                    {"type": "callback", "text": "⚙️ Настройка полей", "payload": "/custom_fields"}
+                    {"type": "callback", "text": "⚙️ Настройка полей", "payload": "/custom_fields"},
+                    {"type": "callback", "text": "🗺️ Зоны посещения", "payload": "/zones_mgmt"}
                 ]
             ]
 
