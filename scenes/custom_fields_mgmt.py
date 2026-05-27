@@ -92,13 +92,6 @@ class CustomFieldsMgmtScene:
             await self.show_choose_zone(n)
             return
 
-        if text == "/menu":
-            from scenes.main_menu import MainMenuScene
-            menu_scene = MainMenuScene()
-            n.activate_next_scene(menu_scene)
-            await menu_scene.send_main_menu(n)
-            return
-
         if step == "choose_zone":
             if text.startswith("/cf_zone_"):
                 selected_zone = text.split("_", 2)[2]

@@ -138,14 +138,6 @@ class UserRequestsScene:
         step = state_data.get("step", "idle")
         idx = state_data.get("idx", 0)
 
-        # Menu navigation
-        if text == "/menu":
-            from scenes.main_menu import MainMenuScene
-            menu_scene = MainMenuScene()
-            n.activate_next_scene(menu_scene)
-            await menu_scene.send_main_menu(n)
-            return
-
         # List navigation
         if text == "/user_prev":
             await self.show_user_requests(n, idx - 1)

@@ -309,9 +309,6 @@ class MainMenuScene:
                     await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
                     await self.send_main_menu(n)
 
-            case "/menu" | "/start":
-                await self.send_main_menu(n)
-
             case _:
                 await n.reply("Неизвестная команда. Пожалуйста, воспользуйтесь меню бота.")
                 await self.send_main_menu(n)

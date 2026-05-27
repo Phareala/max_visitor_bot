@@ -97,11 +97,39 @@ async def main():
             # Ignore messages received before bot startup
             if notification.update and getattr(notification.update, 'timestamp', 0) < (start_time * 1000):
                 return
-            
+
             notification.create_state_id()
 
             if not bot.state_manager.get(notification.state_id):
                 bot.state_manager.create(notification.state_id)
+
+            # ── Global navigation interceptor ─────────────────────────────────
+            # /start and /menu always work from any scene, regardless of state.
+            try:
+                raw_text = notification.text()
+            except ValueError:
+                raw_text = None
+
+            if raw_text in ("/start", "/menu"):
+                # Answer callback before redirecting (won't be handled by a scene)
+                if notification.type() == "message_callback":
+                    await notification.answer_callback("")
+                try:
+                    user_id = str(notification.sender_id())
+                    user = database.get_user(user_id)
+                    if user and user["consent_given"]:
+                        from scenes.main_menu import MainMenuScene
+                        menu_scene = MainMenuScene()
+                        notification.activate_next_scene(menu_scene)
+                        await menu_scene.send_main_menu(notification)
+                    else:
+                        # Not consented yet — restart consent flow
+                        notification.activate_next_scene(start_scene)
+                        await start_scene.execute(notification)
+                except Exception as e:
+                    logger.exception(f"Error in global navigation handler: {e}")
+                return
+            # ─────────────────────────────────────────────────────────────────
 
             current_scene = notification.get_current_scene()
             if not current_scene:

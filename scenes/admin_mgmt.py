@@ -86,13 +86,6 @@ class AdminMgmtScene:
 
         step = state_data.get("step", "admins_list")
 
-        if text == "/menu":
-            from scenes.main_menu import MainMenuScene
-            menu_scene = MainMenuScene()
-            n.activate_next_scene(menu_scene)
-            await menu_scene.send_main_menu(n)
-            return
-
         if text == "/adm_back":
             await self.show_admins_list(n)
             return

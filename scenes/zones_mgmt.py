@@ -62,13 +62,6 @@ class ZonesMgmtScene:
         step = state_data.get("step", "zones_list")
 
         # Return to main menu
-        if text == "/menu":
-            from scenes.main_menu import MainMenuScene
-            menu_scene = MainMenuScene()
-            n.activate_next_scene(menu_scene)
-            await menu_scene.send_main_menu(n)
-            return
-
         # Return to zones list
         if text == "/zones_back":
             await self.show_zones_list(n)
