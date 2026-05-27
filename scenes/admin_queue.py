@@ -30,6 +30,11 @@ class AdminQueueScene:
             "requests": queue
         })
 
+        custom_fields = database.get_request_custom_fields(req['request_id'])
+        cf_text = ""
+        for k, v in custom_fields.items():
+            cf_text += f"📋 **{k}:** {v}\n"
+
         card_text = (
             f"📥 **Очередь заявок на рассмотрении** (Заявка {idx+1} из {total}):\n\n"
             f"🎫 **Номер:** `#{req['request_id']}`\n"
@@ -38,8 +43,11 @@ class AdminQueueScene:
             f"🕒 **Время визита:** {req['visit_time']}\n"
             f"🚪 **Зона посещения:** {req['visit_zone']}\n"
             f"🎯 **Цель визита:** {req['visit_purpose']}\n"
-            f"👤 **Инициатор:** {req['initiator_name'] or 'Неизвестно'} (ID: {req['initiator_id']})"
         )
+        if cf_text:
+            card_text += cf_text
+            
+        card_text += f"👤 **Инициатор:** {req['initiator_name'] or 'Неизвестно'} (ID: {req['initiator_id']})"
 
         buttons = [
             [

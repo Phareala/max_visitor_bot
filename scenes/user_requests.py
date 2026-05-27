@@ -9,7 +9,8 @@ STATUS_MAP = {
     "approved": "Согласована ✅",
     "rejected": "Отклонена ❌",
     "closed": "Закрыта 🔒",
-    "canceled": "Отменена 🔕"
+    "canceled": "Отменена 🔕",
+    "expired": "Просрочена ⏳"
 }
 
 class UserRequestsScene:
@@ -41,6 +42,11 @@ class UserRequestsScene:
         })
 
         status_text = STATUS_MAP.get(req["status"], req["status"])
+        custom_fields = database.get_request_custom_fields(req['request_id'])
+        cf_text = ""
+        for k, v in custom_fields.items():
+            cf_text += f"📋 **{k}:** {v}\n"
+
         card_text = (
             f"🗂 **Ваши заявки на пропуск** (Заявка {idx+1} из {total}):\n\n"
             f"🎫 **Номер:** `#{req['request_id']}`\n"
@@ -49,8 +55,11 @@ class UserRequestsScene:
             f"🕒 **Время визита:** {req['visit_time']}\n"
             f"🚪 **Зона посещения:** {req['visit_zone']}\n"
             f"🎯 **Цель визита:** {req['visit_purpose']}\n"
-            f"🏷️ **Статус:** {status_text}\n"
         )
+        if cf_text:
+            card_text += cf_text
+            
+        card_text += f"🏷️ **Статус:** {status_text}\n"
 
         if req["status"] == "clarification":
             card_text += f"\n💬 **Запрос уточнения от ИБ:**\n_{req['clarification_question']}_\n"

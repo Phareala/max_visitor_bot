@@ -6,6 +6,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visitor_pass
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -53,6 +54,29 @@ def init_db():
                 old_status TEXT,
                 new_status TEXT,
                 comment TEXT
+            )
+        """)
+        
+        # Create custom_fields table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS custom_fields (
+                field_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                zone_name TEXT,
+                field_name TEXT,
+                is_required INTEGER DEFAULT 1,
+                description TEXT,
+                created_at TEXT
+            )
+        """)
+        
+        # Create request_custom_fields table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS request_custom_fields (
+                request_id INTEGER,
+                field_name TEXT,
+                field_value TEXT,
+                PRIMARY KEY (request_id, field_name),
+                FOREIGN KEY (request_id) REFERENCES requests(request_id) ON DELETE CASCADE
             )
         """)
         conn.commit()
@@ -110,11 +134,15 @@ def give_consent(user_id, display_name, role="initiator", version="1.0"):
 
 def delete_user_data(user_id):
     user_id_str = str(user_id)
-    now = datetime.now().isoformat()
     # Log audit event for data deletion BEFORE deleting
     log_audit_event(0, "user_data_deleted", user_id_str, None, None, "User requested complete data deletion")
     
     with get_db_connection() as conn:
+        # Delete request custom fields first
+        conn.execute("""
+            DELETE FROM request_custom_fields
+            WHERE request_id IN (SELECT request_id FROM requests WHERE initiator_id = ?)
+        """, (user_id_str,))
         # Delete requests initiated by the user
         conn.execute("DELETE FROM requests WHERE initiator_id = ?", (user_id_str,))
         # Delete user record itself
@@ -177,6 +205,7 @@ def get_request(request_id):
 
 def get_user_requests(user_id):
     user_id_str = str(user_id)
+    auto_expire_requests()
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT * FROM requests
@@ -186,6 +215,7 @@ def get_user_requests(user_id):
         return [dict(r) for r in rows]
 
 def get_admin_queue():
+    auto_expire_requests()
     with get_db_connection() as conn:
         # Join with users to get initiator's display name
         rows = conn.execute("""
@@ -262,6 +292,7 @@ def get_audit_logs(request_id=None):
         return [dict(r) for r in rows]
 
 def get_system_stats():
+    auto_expire_requests()
     with get_db_connection() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         request_count = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
@@ -277,3 +308,160 @@ def get_system_stats():
             "consented_users": consent_count,
             "status_stats": status_stats
         }
+
+# --- Custom Fields Helper Functions ---
+
+def add_custom_field(zone_name, field_name, is_required, description):
+    now = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        conn.execute("""
+            INSERT INTO custom_fields (zone_name, field_name, is_required, description, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (zone_name, field_name, int(is_required), description, now))
+        conn.commit()
+
+def delete_custom_field(field_id):
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM custom_fields WHERE field_id = ?", (field_id,))
+        conn.commit()
+
+def get_custom_field(field_id):
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT * FROM custom_fields WHERE field_id = ?", (field_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_custom_field_by_name(field_name, zone_name):
+    with get_db_connection() as conn:
+        row = conn.execute("""
+            SELECT * FROM custom_fields
+            WHERE field_name = ? AND (zone_name = ? OR zone_name = 'Все корпуса')
+            LIMIT 1
+        """, (field_name, zone_name)).fetchone()
+        return dict(row) if row else None
+
+def get_custom_fields(zone_name):
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT * FROM custom_fields
+            WHERE zone_name = ? OR zone_name = 'Все корпуса'
+            ORDER BY field_id ASC
+        """, (zone_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_custom_fields_by_zone_exact(zone_name):
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT * FROM custom_fields
+            WHERE zone_name = ?
+            ORDER BY field_id ASC
+        """, (zone_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+def save_request_custom_field_value(request_id, field_name, field_value):
+    with get_db_connection() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO request_custom_fields (request_id, field_name, field_value)
+            VALUES (?, ?, ?)
+        """, (request_id, field_name, field_value))
+        conn.commit()
+
+def get_request_custom_fields(request_id):
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT field_name, field_value FROM request_custom_fields
+            WHERE request_id = ?
+        """, (request_id,)).fetchall()
+        return {r["field_name"]: r["field_value"] for r in rows}
+
+# --- Auto Expiration & Period-based Statistics ---
+
+def auto_expire_requests():
+    now = datetime.now()
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT request_id, visit_date, visit_time, status
+            FROM requests
+            WHERE status IN ('draft', 'review', 'clarification')
+        """).fetchall()
+        
+        expired_ids = []
+        for row in rows:
+            try:
+                visit_dt = datetime.strptime(f"{row['visit_date']} {row['visit_time']}", "%d.%m.%Y %H:%M")
+                if visit_dt < now:
+                    expired_ids.append((row['request_id'], row['status']))
+            except Exception:
+                pass
+        
+        if expired_ids:
+            for req_id, old_status in expired_ids:
+                conn.execute("""
+                    UPDATE requests
+                    SET status = 'expired'
+                    WHERE request_id = ?
+                """, (req_id,))
+                
+                conn.execute("""
+                    INSERT INTO audit_log (request_id, event_type, event_time, performer_id, old_status, new_status, comment)
+                    VALUES (?, 'status_changed', ?, 'system', ?, 'expired', 'Автоматическое закрытие по истечению срока действия')
+                """, (req_id, now.isoformat(), old_status))
+            conn.commit()
+
+def get_period_stats(days=None):
+    with get_db_connection() as conn:
+        if days is not None:
+            from datetime import timedelta
+            start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_iso = start_date.isoformat()
+            query_filter = "WHERE created_at >= ?"
+            params = (start_iso,)
+        else:
+            query_filter = ""
+            params = ()
+            
+        if days is not None:
+            user_count = conn.execute("SELECT COUNT(*) FROM users WHERE consent_time >= ?", params).fetchone()[0]
+        else:
+            user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            
+        req_count = conn.execute(f"SELECT COUNT(*) FROM requests {query_filter}", params).fetchone()[0]
+        
+        status_rows = conn.execute(f"""
+            SELECT status, COUNT(*) 
+            FROM requests 
+            {query_filter}
+            GROUP BY status
+        """, params).fetchall()
+        status_stats = {r[0]: r[1] for r in status_rows}
+        
+        campus_rows = conn.execute(f"""
+            SELECT visit_zone, COUNT(*) 
+            FROM requests 
+            {query_filter}
+            GROUP BY visit_zone
+            ORDER BY COUNT(*) DESC
+        """, params).fetchall()
+        campus_stats = {r[0]: r[1] for r in campus_rows}
+        
+        return {
+            "total_users": user_count,
+            "total_requests": req_count,
+            "status_stats": status_stats,
+            "campus_stats": campus_stats
+        }
+
+def get_all_requests_for_export():
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT r.*, u.display_name as initiator_name
+            FROM requests r
+            LEFT JOIN users u ON r.initiator_id = u.user_id
+            ORDER BY r.request_id ASC
+        """).fetchall()
+        
+        requests_list = []
+        for r in rows:
+            req_dict = dict(r)
+            req_dict["custom_fields"] = get_request_custom_fields(req_dict["request_id"])
+            requests_list.append(req_dict)
+        return requests_list

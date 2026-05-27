@@ -91,6 +91,21 @@ class CreatePassScene:
                 await n.reply_with_keyboard("Введите новую **цель визита**:", "markdown", cancel_btn)
             return
 
+        # Handle field edit commands for custom fields
+        if text.startswith("/edit_cf_"):
+            field_name = text.split("_", 2)[2]
+            n.state_manager.update_state_data(n.state_id, {
+                "step": f"editcf_{field_name}",
+                "edit_mode": True
+            })
+            
+            f_def = database.get_custom_field_by_name(field_name, wizard_data.get("visit_zone", ""))
+            desc = f_def["description"] if f_def else f"Введите новое значение для {field_name}:"
+            
+            cancel_btn = [[{"type": "callback", "text": "❌ Назад к сводке", "payload": "/back_to_summary"}]]
+            await n.reply_with_keyboard(desc, "markdown", cancel_btn)
+            return
+
         # Back to summary button
         if text == "/back_to_summary":
             n.state_manager.update_state_data(n.state_id, {
@@ -113,6 +128,10 @@ class CreatePassScene:
                 visit_purpose=wizard_data["visit_purpose"]
             )
             
+            # Save custom fields values!
+            for name, val in wizard_data.get("custom_fields", {}).items():
+                database.save_request_custom_field_value(req_id, name, val)
+            
             # Immediately transition to "review" status
             database.update_request_status(req_id, "review", user_id)
             
@@ -128,6 +147,33 @@ class CreatePassScene:
             menu_scene = MainMenuScene()
             n.activate_next_scene(menu_scene)
             await menu_scene.send_main_menu(n)
+            return
+
+        # Process custom fields updates in edit mode
+        if step.startswith("editcf_"):
+            field_name = step.split("_", 1)[1]
+            val = text.strip()
+            
+            f_def = database.get_custom_field_by_name(field_name, wizard_data.get("visit_zone", ""))
+            if f_def and f_def["is_required"] and not val:
+                cancel_btn = [[{"type": "callback", "text": "❌ Назад к сводке", "payload": "/back_to_summary"}]]
+                await n.reply_with_keyboard(
+                    f"❌ **Это поле является обязательным!**\n\n"
+                    f"{f_def['description']}",
+                    "markdown",
+                    cancel_btn
+                )
+                return
+                
+            if "custom_fields" not in wizard_data:
+                wizard_data["custom_fields"] = {}
+            wizard_data["custom_fields"][field_name] = val
+            
+            n.state_manager.update_state_data(n.state_id, {
+                "step": "summary",
+                "edit_mode": False
+            })
+            await self.show_summary(n, wizard_data)
             return
 
         # Process standard step-by-step inputs
@@ -165,6 +211,7 @@ class CreatePassScene:
         elif step == "visit_date":
             # Calculate quick date options
             today = datetime.now()
+            today_date = datetime(today.year, today.month, today.day)
             quick_dates = {
                 "сегодня": today.strftime("%d.%m.%Y"),
                 "завтра": (today + timedelta(days=1)).strftime("%d.%m.%Y"),
@@ -177,15 +224,14 @@ class CreatePassScene:
             if input_val in quick_dates:
                 date_str = quick_dates[input_val]
             else:
-                # Parse manual format
-                # Expecting DD.MM.YYYY
+                # Parse manual format (DD.MM.YYYY)
                 match = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", text.strip())
                 if match:
                     try:
                         parsed_date = datetime.strptime(text.strip(), "%d.%m.%Y")
-                        # Validate that it is not in the past (only date part)
-                        today_date = datetime(today.year, today.month, today.day)
-                        if parsed_date >= today_date:
+                        # Enforce date is not in the past and not more than 365 days in the future
+                        one_year_limit = today_date + timedelta(days=365)
+                        if today_date <= parsed_date <= one_year_limit:
                             date_str = text.strip()
                     except ValueError:
                         pass
@@ -195,7 +241,7 @@ class CreatePassScene:
                 btn_text = "❌ Назад к сводке" if edit_mode else "❌ Отменить"
                 await n.reply_with_keyboard(
                     "❌ **Некорректная дата!**\n\n"
-                    "Дата должна быть в формате ДД.ММ.ГГГГ и не может быть в прошлом.\n"
+                    "Дата должна быть в формате ДД.ММ.ГГГГ, не может быть в прошлом и не может быть более чем на 1 год вперед.\n"
                     "Пожалуйста, выберите или введите дату визита:",
                     "markdown",
                     self.get_date_buttons() + [[{"type": "callback", "text": btn_text, "payload": cancel_btn}]]
@@ -221,22 +267,22 @@ class CreatePassScene:
 
         elif step == "visit_time":
             time_val = text.strip()
-            # Validate time format loosely (just check HH:MM or similar)
-            # Accept any input for flexibility, but warn if format is completely invalid
-            if not re.match(r"^\d{2}:\d{2}$", time_val):
-                # We can still accept it but suggest clean input, or enforce formatting
-                # Let's enforce formatting for consistency
+            # Enforce HH:MM format with hours 00-23 and minutes 00-59, support single hour digit padding
+            match = re.match(r"^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$", time_val)
+            if not match:
                 cancel_btn = "/back_to_summary" if edit_mode else "/cancel_wizard"
                 btn_text = "❌ Назад к сводке" if edit_mode else "❌ Отменить"
                 await n.reply_with_keyboard(
                     "❌ **Некорректное время!**\n\n"
-                    "Пожалуйста, введите время в формате ЧЧ:ММ (например, `14:30`):",
+                    "Пожалуйста, введите время в диапазоне от 00:00 до 23:59 в формате ЧЧ:ММ (например, `14:30` или `9:00`):",
                     "markdown",
                     self.get_time_buttons() + [[{"type": "callback", "text": btn_text, "payload": cancel_btn}]]
                 )
                 return
 
-            wizard_data["visit_time"] = time_val
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            wizard_data["visit_time"] = f"{hour:02d}:{minute:02d}"
             
             if edit_mode:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
@@ -248,15 +294,24 @@ class CreatePassScene:
                 })
                 await n.reply_with_keyboard(
                     "🚪 **Оформление разового пропуска (4/5)**\n\n"
-                    "Выберите зону посещения:",
+                    "Выберите зону посещения (корпус):",
                     "markdown",
                     self.get_zone_buttons() + [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
                 )
 
         elif step == "visit_zone":
+            from scenes.custom_fields_mgmt import CAMPUSES
             zone_val = text.strip()
-            if not zone_val:
-                zone_val = "Главный корпус"
+            if zone_val not in CAMPUSES:
+                cancel_btn = "/back_to_summary" if edit_mode else "/cancel_wizard"
+                btn_text = "❌ Назад к сводке" if edit_mode else "❌ Отменить"
+                await n.reply_with_keyboard(
+                    "❌ **Некорректная зона посещения!**\n\n"
+                    "Пожалуйста, выберите одну из предложенных зон с помощью кнопок:",
+                    "markdown",
+                    self.get_zone_buttons() + [[{"type": "callback", "text": btn_text, "payload": cancel_btn}]]
+                )
+                return
             
             wizard_data["visit_zone"] = zone_val
             
@@ -291,12 +346,82 @@ class CreatePassScene:
 
             wizard_data["visit_purpose"] = purpose_val
             
-            n.state_manager.update_state_data(n.state_id, {
-                "step": "summary",
-                "edit_mode": False,
-                "wizard_data": wizard_data
-            })
-            await self.show_summary(n, wizard_data)
+            if edit_mode:
+                n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
+                await self.show_summary(n, wizard_data)
+            else:
+                # Dynamic check for custom fields configuration
+                custom_fields = database.get_custom_fields(wizard_data["visit_zone"])
+                if custom_fields:
+                    n.state_manager.update_state_data(n.state_id, {
+                        "step": f"custom_{custom_fields[0]['field_id']}",
+                        "wizard_data": wizard_data,
+                        "custom_fields_to_ask": [f["field_id"] for f in custom_fields],
+                        "current_cf_idx": 0
+                    })
+                    first_f = custom_fields[0]
+                    buttons = [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
+                    await n.reply_with_keyboard(
+                        f"📋 **Заполнение дополнительных полей (1/{len(custom_fields)})**\n\n"
+                        f"{first_f['description']}",
+                        "markdown",
+                        buttons
+                    )
+                else:
+                    n.state_manager.update_state_data(n.state_id, {
+                        "step": "summary",
+                        "edit_mode": False,
+                        "wizard_data": wizard_data
+                    })
+                    await self.show_summary(n, wizard_data)
+
+        # Process custom fields collection steps
+        elif step.startswith("custom_"):
+            field_id = int(step.split("_")[1])
+            custom_fields_to_ask = state_data["custom_fields_to_ask"]
+            current_idx = state_data["current_cf_idx"]
+            
+            f_def = database.get_custom_field(field_id)
+            val = text.strip()
+            
+            if f_def:
+                if f_def["is_required"] and not val:
+                    buttons = [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
+                    await n.reply_with_keyboard(
+                        f"❌ **Это поле обязательно для заполнения!**\n\n"
+                        f"{f_def['description']}",
+                        "markdown",
+                        buttons
+                    )
+                    return
+                
+                if "custom_fields" not in wizard_data:
+                    wizard_data["custom_fields"] = {}
+                wizard_data["custom_fields"][f_def["field_name"]] = val
+                
+            next_idx = current_idx + 1
+            if next_idx < len(custom_fields_to_ask):
+                next_field_id = custom_fields_to_ask[next_idx]
+                next_f_def = database.get_custom_field(next_field_id)
+                n.state_manager.update_state_data(n.state_id, {
+                    "step": f"custom_{next_field_id}",
+                    "current_cf_idx": next_idx,
+                    "wizard_data": wizard_data
+                })
+                buttons = [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
+                await n.reply_with_keyboard(
+                    f"📋 **Заполнение дополнительных полей ({next_idx+1}/{len(custom_fields_to_ask)})**\n\n"
+                    f"{next_f_def['description'] if next_f_def else 'Введите значение:'}",
+                    "markdown",
+                    buttons
+                )
+            else:
+                n.state_manager.update_state_data(n.state_id, {
+                    "step": "summary",
+                    "edit_mode": False,
+                    "wizard_data": wizard_data
+                })
+                await self.show_summary(n, wizard_data)
 
     async def show_summary(self, n, data):
         summary_text = (
@@ -305,9 +430,14 @@ class CreatePassScene:
             f"📅 **Дата визита:** {data['visit_date']}\n"
             f"🕒 **Время визита:** {data['visit_time']}\n"
             f"🚪 **Зона посещения:** {data['visit_zone']}\n"
-            f"🎯 **Цель визита:** {data['visit_purpose']}\n\n"
-            "Пожалуйста, проверьте все данные. Для редактирования конкретного поля нажмите соответствующую кнопку."
+            f"🎯 **Цель визита:** {data['visit_purpose']}\n"
         )
+        
+        custom_fields = data.get("custom_fields", {})
+        for name, val in custom_fields.items():
+            summary_text += f"📋 **{name}:** {val}\n"
+            
+        summary_text += "\nПожалуйста, проверьте все данные. Для редактирования нажмите соответствующую кнопку."
 
         buttons = [
             [
@@ -322,10 +452,20 @@ class CreatePassScene:
                 {"type": "callback", "text": "🚪 Изменить Зону", "payload": "/edit_visit_zone"}
             ],
             [
-                {"type": "callback", "text": "🎯 Изменить Цель", "payload": "/edit_visit_purpose"},
-                {"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}
+                {"type": "callback", "text": "🎯 Изменить Цель", "payload": "/edit_visit_purpose"}
             ]
         ]
+        
+        custom_edit_row = []
+        for name in custom_fields.keys():
+            custom_edit_row.append({"type": "callback", "text": f"✏️ {name}", "payload": f"/edit_cf_{name}"})
+            if len(custom_edit_row) == 2:
+                buttons.append(custom_edit_row)
+                custom_edit_row = []
+        if custom_edit_row:
+            buttons.append(custom_edit_row)
+            
+        buttons.append([{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}])
 
         await n.reply_with_keyboard(summary_text, "markdown", buttons)
 
@@ -353,13 +493,5 @@ class CreatePassScene:
         ]
 
     def get_zone_buttons(self):
-        return [
-            [
-                {"type": "callback", "text": "Корпус А", "payload": "Корпус А"},
-                {"type": "callback", "text": "Корпус Б", "payload": "Корпус Б"}
-            ],
-            [
-                {"type": "callback", "text": "Лабораторная зона", "payload": "Лабораторная зона"},
-                {"type": "callback", "text": "Конференц-зал", "payload": "Конференц-зал"}
-            ]
-        ]
+        from scenes.custom_fields_mgmt import CAMPUSES
+        return [[{"type": "callback", "text": c, "payload": c}] for c in CAMPUSES]
