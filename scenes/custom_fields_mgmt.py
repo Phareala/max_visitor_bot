@@ -25,7 +25,7 @@ class CustomFieldsMgmtScene:
         campuses = database.get_zones()
         buttons = []
         for campus in campuses:
-            buttons.append([{"type": "callback", "text": campus, "payload": f"/cf_zone_{campus}"}])
+            buttons.append([{"type": "callback", "text": database.zone_btn_label(campus), "payload": f"/cf_zone_{campus}"}])
         buttons.append([{"type": "callback", "text": "🌐 Все корпуса", "payload": "/cf_zone_Все корпуса"}])
         buttons.append([{"type": "callback", "text": "◀️ В меню", "payload": "/menu"}])
 

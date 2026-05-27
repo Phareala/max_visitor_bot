@@ -124,6 +124,23 @@ def init_db():
                 )
             conn.commit()
 
+        # One-time migration: fix zone names where Altair was incorrectly placed
+        _zone_renames = {
+            "Проспект Вернадского, 78 (Главный кампус / Альтаир)": "Проспект Вернадского, 78 (Главный кампус)",
+            "Проспект Вернадского, 86 (ИТХТ)":                     "Проспект Вернадского, 86 (Альтаир / ИТХТ)",
+        }
+        for old_name, new_name in _zone_renames.items():
+            conn.execute(
+                "UPDATE zones SET zone_name = ? WHERE zone_name = ?",
+                (new_name, old_name)
+            )
+            # Also fix custom_fields references
+            conn.execute(
+                "UPDATE custom_fields SET zone_name = ? WHERE zone_name = ?",
+                (new_name, old_name)
+            )
+        conn.commit()
+
 # --- User Management ---
 
 def get_admins():
@@ -440,6 +457,13 @@ def get_request_custom_fields(request_id):
         return {r["field_name"]: r["field_value"] for r in rows}
 
 # --- Zones Management ---
+
+def zone_btn_label(zone_name: str, prefix: str = "", max_len: int = 36) -> str:
+    """Truncate a zone name to fit inside a messenger button label."""
+    label = f"{prefix}{zone_name}" if prefix else zone_name
+    if len(label) > max_len:
+        label = label[:max_len - 1] + "…"
+    return label
 
 def get_zones():
     """Return list of active zone name strings, ordered by display_order."""

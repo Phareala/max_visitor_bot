@@ -527,4 +527,4 @@ class CreatePassScene:
 
     def get_zone_buttons(self):
         zones = database.get_zones()
-        return [[{"type": "callback", "text": z, "payload": z}] for z in zones]
+        return [[{"type": "callback", "text": database.zone_btn_label(z), "payload": z}] for z in zones]

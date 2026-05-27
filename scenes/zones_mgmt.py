@@ -1,5 +1,6 @@
 """Zone management scene for the technical administrator (Task 3)."""
 import database
+from database import zone_btn_label
 
 
 class ZonesMgmtScene:
@@ -26,7 +27,7 @@ class ZonesMgmtScene:
         # Action buttons per zone
         for z in zones:
             row = [
-                {"type": "callback", "text": f"✏️ {z['zone_name'][:25]}", "payload": f"/zone_rename_{z['zone_id']}"},
+                {"type": "callback", "text": zone_btn_label(z['zone_name'], prefix="✏️ ", max_len=30), "payload": f"/zone_rename_{z['zone_id']}"},
                 {"type": "callback", "text": "🗑", "payload": f"/zone_del_{z['zone_id']}"}
             ]
             buttons.append(row)
