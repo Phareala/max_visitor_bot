@@ -282,6 +282,16 @@ class MainMenuScene:
                     await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
                     await self.send_main_menu(n)
 
+            case "/admin_mgmt":
+                if role == "tech_admin":
+                    from scenes.admin_mgmt import AdminMgmtScene
+                    next_scene = AdminMgmtScene()
+                    n.activate_next_scene(next_scene)
+                    await next_scene.show_admins_list(n)
+                else:
+                    await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
+                    await self.send_main_menu(n)
+
             case "/tech_logs":
                 if role == "tech_admin":
                     logs = database.get_audit_logs()
@@ -340,6 +350,9 @@ class MainMenuScene:
                 [
                     {"type": "callback", "text": "⚙️ Настройка полей", "payload": "/custom_fields"},
                     {"type": "callback", "text": "🗺️ Зоны посещения", "payload": "/zones_mgmt"}
+                ],
+                [
+                    {"type": "callback", "text": "👥 Администраторы", "payload": "/admin_mgmt"}
                 ]
             ]
 

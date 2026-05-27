@@ -126,6 +126,29 @@ def init_db():
 
 # --- User Management ---
 
+def get_admins():
+    """Return all users with role 'admin' or 'tech_admin' stored in the DB."""
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT user_id, display_name, role, consent_given
+            FROM users
+            WHERE role IN ('admin', 'tech_admin')
+            ORDER BY role, display_name
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+def set_user_role(user_id, role):
+    """Update role of an existing user. Creates a stub record if user doesn't exist yet."""
+    user_id_str = str(user_id)
+    now = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        conn.execute("""
+            INSERT INTO users (user_id, display_name, role, consent_given, consent_time)
+            VALUES (?, ?, ?, 0, ?)
+            ON CONFLICT(user_id) DO UPDATE SET role = excluded.role
+        """, (user_id_str, f"User {user_id_str}", role, now))
+        conn.commit()
+
 def get_user(user_id):
     with get_db_connection() as conn:
         row = conn.execute("SELECT * FROM users WHERE user_id = ?", (str(user_id),)).fetchone()
