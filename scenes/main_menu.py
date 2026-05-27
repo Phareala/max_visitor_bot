@@ -292,6 +292,23 @@ class MainMenuScene:
                     await n.reply("⛔ Доступ ограничен. Эта функция доступна только техническим администраторам.")
                     await self.send_main_menu(n)
 
+            case "/user_list":
+                if role == "tech_admin":
+                    from scenes.user_list import UserListScene
+                    next_scene = UserListScene()
+                    n.activate_next_scene(next_scene)
+                    await next_scene.show_user_list(n)
+                else:
+                    await n.reply("⛔ Доступ ограничен.")
+                    await self.send_main_menu(n)
+
+            case "/my_id":
+                await n.reply(
+                    f"🪪 **Ваш ID в системе:** `{user_id}`\n\n"
+                    f"_Этот ID уникально идентифицирует вас в мессенджере MAX. "
+                    f"Сообщите его администратору, если вам нужны расширенные права._"
+                )
+
             case "/tech_logs":
                 if role == "tech_admin":
                     logs = database.get_audit_logs()
@@ -349,7 +366,8 @@ class MainMenuScene:
                     {"type": "callback", "text": "🗺️ Зоны посещения", "payload": "/zones_mgmt"}
                 ],
                 [
-                    {"type": "callback", "text": "👥 Администраторы", "payload": "/admin_mgmt"}
+                    {"type": "callback", "text": "👥 Пользователи", "payload": "/user_list"},
+                    {"type": "callback", "text": "🔑 Администраторы", "payload": "/admin_mgmt"}
                 ]
             ]
 
@@ -364,6 +382,7 @@ class MainMenuScene:
                     {"type": "callback", "text": "🗂 Мои заявки", "payload": "/my_requests"}
                 ],
                 [
+                    {"type": "callback", "text": "🪪 Мой ID", "payload": "/my_id"},
                     {"type": "callback", "text": "🗑 Удалить мои данные", "payload": "/delete_my_data"}
                 ]
             ]

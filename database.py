@@ -143,6 +143,38 @@ def init_db():
 
 # --- User Management ---
 
+def get_users_count(search: str = None) -> int:
+    """Return total number of users, optionally filtered by name/ID search."""
+    with get_db_connection() as conn:
+        if search:
+            like = f"%{search}%"
+            return conn.execute(
+                "SELECT COUNT(*) FROM users WHERE user_id LIKE ? OR display_name LIKE ?",
+                (like, like)
+            ).fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+def get_users_page(limit: int = 8, offset: int = 0, search: str = None) -> list:
+    """Return a page of users sorted by newest first, optionally filtered."""
+    with get_db_connection() as conn:
+        if search:
+            like = f"%{search}%"
+            rows = conn.execute("""
+                SELECT user_id, display_name, role, consent_given, consent_time
+                FROM users
+                WHERE user_id LIKE ? OR display_name LIKE ?
+                ORDER BY consent_time DESC
+                LIMIT ? OFFSET ?
+            """, (like, like, limit, offset)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT user_id, display_name, role, consent_given, consent_time
+                FROM users
+                ORDER BY consent_time DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset)).fetchall()
+        return [dict(r) for r in rows]
+
 def get_admins():
     """Return all users with role 'admin' or 'tech_admin' stored in the DB."""
     with get_db_connection() as conn:

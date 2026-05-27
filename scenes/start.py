@@ -37,12 +37,16 @@ class StartScene:
         if text == "/consent_yes":
             admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
             tech_admin_ids = [x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()]
-            
+
             role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
             database.give_consent(user_id, display_name, role)
-            
-            await n.reply("✅ Спасибо! Согласие успешно зафиксировано.")
-            
+
+            await n.reply(
+                f"✅ Спасибо! Согласие успешно зафиксировано.\n\n"
+                f"🪪 Ваш ID в системе: `{user_id}`\n"
+                f"_Сохраните его — он понадобится, если вам нужно будет получить права администратора._"
+            )
+
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
             n.activate_next_scene(menu_scene)
