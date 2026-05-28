@@ -223,8 +223,8 @@ class MainMenuScene:
                             temp_path = temp_file.name
 
                         try:
-                            upload_resp = await n.bot.api.uploads.get_upload_url_async(UploadType.FILE)
-                            uploaded_info = await n.bot.api.uploads.upload_multipart_async(upload_resp.url, temp_path)
+                            upload_resp = await n.bot.uploads.get_upload_url_async(UploadType.FILE)
+                            uploaded_info = await n.bot.uploads.upload_multipart_async(upload_resp.url, temp_path)
 
                             if uploaded_info and uploaded_info.token:
                                 req = SendMessageReq(
@@ -240,7 +240,7 @@ class MainMenuScene:
                                         )
                                     ]
                                 )
-                                await n.bot.api.messages.send_message_async(req)
+                                await n.bot.messages.send_message_async(req)
                             else:
                                 raise Exception("Пустой ответ при загрузке файла")
                         finally:

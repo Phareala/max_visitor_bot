@@ -15,7 +15,7 @@ async def send_notification(n, target_user_id, text: str):
             text=text,
             format="markdown"
         )
-        await n.bot.api.messages.send_message_async(req)
+        await n.bot.messages.send_message_async(req)
     except Exception as e:
         logger.warning(f"Не удалось отправить уведомление пользователю {target_user_id}: {e}")
 
