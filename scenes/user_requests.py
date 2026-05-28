@@ -213,14 +213,13 @@ class UserRequestsScene:
                 await n.reply("✅ Ваш ответ успешно отправлен. Заявка возвращена на рассмотрение в службу безопасности.")
 
                 # Уведомляем администраторов ИБ о полученном ответе
-                admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
                 notify_text = (
                     f"🔔 **Инициатор ответил на запрос уточнения по заявке №{req_id}!**\n\n"
                     f"• Гость: {req['visitor_name']}\n"
                     f"• Ответ инициатора:\n"
                     f"_{answer_text}_"
                 )
-                await notifications.notify_admins(n, admin_ids, notify_text)
+                await notifications.notify_all_admins(n, notify_text)
 
             await self.show_user_requests(n, idx)
             return

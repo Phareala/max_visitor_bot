@@ -478,7 +478,7 @@ class CreatePassScene:
 
     async def _notify_admins_new_request(self, n, req_id: int, wizard_data: dict):
         """Уведомляет всех администраторов ИБ о новой поступившей заявке."""
-        admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
+        admin_ids = notifications.get_all_admin_ids()
         if not admin_ids:
             return
 

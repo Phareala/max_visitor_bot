@@ -1,4 +1,5 @@
 """Общие утилиты уведомлений для бота электронного бюро пропусков."""
+import os
 import logging
 import database
 from maxbot_api_client_python.types import models
@@ -19,10 +20,22 @@ async def send_notification(n, target_user_id, text: str):
         logger.warning(f"Не удалось отправить уведомление пользователю {target_user_id}: {e}")
 
 
+def get_all_admin_ids() -> list[str]:
+    """Возвращает объединённый список ID администраторов ИБ из .env и базы данных."""
+    env_ids = {x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()}
+    db_admin_ids = {u["user_id"] for u in database.get_admins() if u["role"] == "admin"}
+    return list(env_ids | db_admin_ids)
+
+
 async def notify_admins(n, admin_ids: list[str], text: str):
     """Рассылает уведомление всем администраторам из списка."""
     for admin_id in admin_ids:
         await send_notification(n, admin_id, text)
+
+
+async def notify_all_admins(n, text: str):
+    """Рассылает уведомление всем администраторам ИБ (.env + БД)."""
+    await notify_admins(n, get_all_admin_ids(), text)
 
 
 async def send_expiry_notifications(n):
