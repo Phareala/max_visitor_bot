@@ -1,4 +1,4 @@
-"""User list scene for the technical administrator."""
+"""Сцена списка пользователей для технического администратора."""
 import database
 
 PAGE_SIZE = 8

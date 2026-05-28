@@ -9,14 +9,14 @@ from maxbot_api_client_python import API, Config
 from scenes.start import StartScene
 import database
 
-# Configure logging
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("max_visitor_bot")
 
-# Monkey patch Notification to edit instead of sending new message when clicked on callbacks
+# Monkey-патч: при коллбэках редактировать существующее сообщение вместо отправки нового
 from maxbot_chatbot_python import Notification
 from maxbot_api_client_python import models, utils
 
@@ -35,7 +35,7 @@ async def smart_reply_with_keyboard(self, text: str, format_type: str | None, bu
             await self.bot.api.messages.edit_message_async(req)
             return
         except Exception as e:
-            logger.warning(f"Failed to edit message {self.update.message_id}, sending new: {e}")
+            logger.warning(f"Не удалось отредактировать сообщение {self.update.message_id}, отправляем новое: {e}")
     await original_reply_with_keyboard(self, text, format_type, buttons)
 
 async def smart_reply(self, text: str, format_type: str | None = "markdown"):
@@ -50,7 +50,7 @@ async def smart_reply(self, text: str, format_type: str | None = "markdown"):
             await self.bot.api.messages.edit_message_async(req)
             return
         except Exception as e:
-            logger.warning(f"Failed to edit message {self.update.message_id}, sending new: {e}")
+            logger.warning(f"Не удалось отредактировать сообщение {self.update.message_id}, отправляем новое: {e}")
     await original_reply(self, text, format_type)
 
 Notification.reply_with_keyboard = smart_reply_with_keyboard
@@ -58,22 +58,22 @@ Notification.reply = smart_reply
 
 
 async def main():
-    # Load environment variables
+    # Загрузка переменных окружения
     load_dotenv()
-    
-    # Initialize database
-    logger.info("Initializing database...")
+
+    # Инициализация базы данных
+    logger.info("Инициализация базы данных...")
     database.init_db()
-    
-    # Read configuration
+
+    # Чтение конфигурации
     base_url = os.getenv("BASE_URL", "https://platform-api.max.ru")
     token = os.getenv("TOKEN")
-    
+
     if not token:
-        logger.error("API TOKEN is missing in configuration! Please specify TOKEN in .env file.")
+        logger.error("TOKEN отсутствует в конфигурации! Укажите TOKEN в файле .env")
         return
-        
-    logger.info(f"Starting bot using base_url: {base_url}")
+
+    logger.info(f"Запуск бота с base_url: {base_url}")
     
     cfg = Config(
         base_url=base_url,
@@ -94,7 +94,7 @@ async def main():
         @bot.router.register("message_created")
         @bot.router.register("message_callback")
         async def scene_handler(notification):
-            # Ignore messages received before bot startup
+            # Игнорируем сообщения, полученные до запуска бота
             if notification.update and getattr(notification.update, 'timestamp', 0) < (start_time * 1000):
                 return
 
@@ -103,15 +103,15 @@ async def main():
             if not bot.state_manager.get(notification.state_id):
                 bot.state_manager.create(notification.state_id)
 
-            # ── Global navigation interceptor ─────────────────────────────────
-            # /start and /menu always work from any scene, regardless of state.
+            # ── Глобальный перехватчик навигации ─────────────────────────────
+            # /start и /menu работают из любой сцены, независимо от состояния.
             try:
                 raw_text = notification.text()
             except ValueError:
                 raw_text = None
 
             if raw_text in ("/start", "/menu"):
-                # Answer callback before redirecting (won't be handled by a scene)
+                # Подтверждаем коллбэк до перенаправления (сцена не будет его обрабатывать)
                 if notification.type() == "message_callback":
                     await notification.answer_callback("")
                 try:
@@ -123,11 +123,11 @@ async def main():
                         notification.activate_next_scene(menu_scene)
                         await menu_scene.send_main_menu(notification)
                     else:
-                        # Not consented yet — restart consent flow
+                        # Согласие ещё не дано — перезапускаем сцену согласия
                         notification.activate_next_scene(start_scene)
                         await start_scene.execute(notification)
                 except Exception as e:
-                    logger.exception(f"Error in global navigation handler: {e}")
+                    logger.exception(f"Ошибка в глобальном обработчике навигации: {e}")
                 return
             # ─────────────────────────────────────────────────────────────────
 
@@ -140,21 +140,21 @@ async def main():
                 try:
                     await current_scene.execute(notification)
                 except Exception as e:
-                    logger.exception(f"Error executing scene {type(current_scene).__name__}: {e}")
+                    logger.exception(f"Ошибка при выполнении сцены {type(current_scene).__name__}: {e}")
                     await notification.reply("❌ Произошла внутренняя ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
             else:
-                logger.error(f"Current scene {type(current_scene).__name__} does not implement 'execute'")
+                logger.error(f"Сцена {type(current_scene).__name__} не реализует метод 'execute'")
 
         try:
-            logger.info("Bot polling loop started.")
+            logger.info("Цикл опроса бота запущен.")
             await bot.start_polling()
         except asyncio.CancelledError:
-            logger.info("The bot polling has been cancelled.")
+            logger.info("Цикл опроса бота отменён.")
         except Exception as e:
-            logger.exception(f"Unexpected error in bot polling: {e}")
+            logger.exception(f"Неожиданная ошибка в цикле опроса бота: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by User (KeyboardInterrupt).")
+        logger.info("Бот остановлен пользователем (KeyboardInterrupt).")

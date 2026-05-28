@@ -23,17 +23,17 @@ class StartScene:
             await n.reply("Ошибка: не удалось определить вашего пользователя.")
             return
 
-        # Check if user already gave consent
+        # Проверяем, дал ли пользователь согласие ранее
         user = database.get_user(user_id)
         if user and user["consent_given"] == 1:
-            # Already has consent, proceed to main menu
+            # Согласие есть — переходим в главное меню
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
             n.activate_next_scene(menu_scene)
             await menu_scene.send_main_menu(n)
             return
 
-        # If user clicked consent buttons
+        # Обработка нажатия на кнопку согласия
         if text == "/consent_yes":
             admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
             tech_admin_ids = [x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()]
@@ -63,7 +63,7 @@ class StartScene:
             )
             return
 
-        # Otherwise, show welcome, disclaimer, and request consent
+        # Иначе — показываем приветствие, дисклеймер и запрос согласия
         welcome_text = (
             "👋 **Добро пожаловать в Электронное бюро пропусков!**\n\n"
             "Этот чат-бот предназначен для быстрого оформления разовых гостевых пропусков на конкретную дату.\n\n"

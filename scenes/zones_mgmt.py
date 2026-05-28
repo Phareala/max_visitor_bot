@@ -1,4 +1,4 @@
-"""Zone management scene for the technical administrator (Task 3)."""
+"""Сцена управления зонами посещения для технического администратора."""
 import database
 from database import zone_btn_label
 
@@ -61,13 +61,12 @@ class ZonesMgmtScene:
 
         step = state_data.get("step", "zones_list")
 
-        # Return to main menu
-        # Return to zones list
+        # Возврат к списку зон
         if text == "/zones_back":
             await self.show_zones_list(n)
             return
 
-        # ── Add zone ──────────────────────────────────────────────────────────
+        # ── Добавление зоны ──────────────────────────────────────────────────
 
         if text == "/zone_add":
             n.state_manager.update_state_data(n.state_id, {"step": "add_zone_name"})
@@ -104,7 +103,7 @@ class ZonesMgmtScene:
             await self.show_zones_list(n)
             return
 
-        # ── Delete zone ───────────────────────────────────────────────────────
+        # ── Удаление зоны ───────────────────────────────────────────────────
 
         if text.startswith("/zone_del_"):
             zone_id = int(text.split("_")[2])
@@ -143,7 +142,7 @@ class ZonesMgmtScene:
             await self.show_zones_list(n)
             return
 
-        # ── Rename zone ───────────────────────────────────────────────────────
+        # ── Переименование зоны ─────────────────────────────────────────────
 
         if text.startswith("/zone_rename_"):
             zone_id = int(text.split("_")[2])
@@ -198,5 +197,5 @@ class ZonesMgmtScene:
             await self.show_zones_list(n)
             return
 
-        # Default: return to zones list
+        # По умолчанию: возврат к списку зон
         await self.show_zones_list(n)

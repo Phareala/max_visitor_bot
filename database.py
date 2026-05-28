@@ -4,7 +4,7 @@ from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visitor_passes.db")
 
-# Default zones list (used to seed the DB on first startup)
+# Список зон по умолчанию (для первоначального заполнения БД)
 DEFAULT_ZONES = [
     "Проспект Вернадского, 78 (Главный кампус)",
     "Проспект Вернадского, 86 (Альтаир / ИТХТ)",
@@ -23,7 +23,7 @@ def get_db_connection():
 
 def init_db():
     with get_db_connection() as conn:
-        # Create users table
+        # Создание таблицы пользователей
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
@@ -35,7 +35,7 @@ def init_db():
             )
         """)
 
-        # Create requests table
+        # Создание таблицы заявок
         conn.execute("""
             CREATE TABLE IF NOT EXISTS requests (
                 request_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,16 +54,16 @@ def init_db():
             )
         """)
 
-        # Add expire_notified column to requests if it doesn't exist
-        # Default = 1 means "already notified" for all existing rows,
-        # new expirations will be set to 0 explicitly
+        # Добавление колонки expire_notified в таблицу заявок (если её нет).
+        # DEFAULT = 1 означает «уже уведомлено» для всех существующих записей;
+        # новые истечения срока будут явно устанавливаться в 0.
         try:
             conn.execute("ALTER TABLE requests ADD COLUMN expire_notified INTEGER DEFAULT 1")
             conn.commit()
         except Exception:
-            pass  # Column already exists
+            pass  # Колонка уже существует
 
-        # Create audit_log table
+        # Создание таблицы журнала аудита
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
                 log_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +77,7 @@ def init_db():
             )
         """)
 
-        # Create custom_fields table
+        # Создание таблицы кастомных полей
         conn.execute("""
             CREATE TABLE IF NOT EXISTS custom_fields (
                 field_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,7 @@ def init_db():
             )
         """)
 
-        # Create request_custom_fields table
+        # Создание таблицы значений кастомных полей заявок
         conn.execute("""
             CREATE TABLE IF NOT EXISTS request_custom_fields (
                 request_id INTEGER,
@@ -100,7 +100,7 @@ def init_db():
             )
         """)
 
-        # Create zones table
+        # Создание таблицы зон посещения
         conn.execute("""
             CREATE TABLE IF NOT EXISTS zones (
                 zone_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,7 +113,7 @@ def init_db():
 
         conn.commit()
 
-        # Seed default zones if table is empty
+        # Заполнение таблицы зон значениями по умолчанию (если пустая)
         count = conn.execute("SELECT COUNT(*) FROM zones").fetchone()[0]
         if count == 0:
             now = datetime.now().isoformat()
@@ -124,7 +124,7 @@ def init_db():
                 )
             conn.commit()
 
-        # One-time migration: fix zone names where Altair was incorrectly placed
+        # Одноразовая миграция: исправление названий зон с некорректным расположением Альтаир
         _zone_renames = {
             "Проспект Вернадского, 78 (Главный кампус / Альтаир)": "Проспект Вернадского, 78 (Главный кампус)",
             "Проспект Вернадского, 86 (ИТХТ)":                     "Проспект Вернадского, 86 (Альтаир / ИТХТ)",
@@ -134,17 +134,17 @@ def init_db():
                 "UPDATE zones SET zone_name = ? WHERE zone_name = ?",
                 (new_name, old_name)
             )
-            # Also fix custom_fields references
+            # Обновляем ссылки в кастомных полях
             conn.execute(
                 "UPDATE custom_fields SET zone_name = ? WHERE zone_name = ?",
                 (new_name, old_name)
             )
         conn.commit()
 
-# --- User Management ---
+# --- Управление пользователями ---
 
 def get_users_count(search: str = None) -> int:
-    """Return total number of users, optionally filtered by name/ID search."""
+    """Возвращает общее число пользователей, опционально с фильтрацией по имени/ID."""
     with get_db_connection() as conn:
         if search:
             like = f"%{search}%"
@@ -155,7 +155,7 @@ def get_users_count(search: str = None) -> int:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 def get_users_page(limit: int = 8, offset: int = 0, search: str = None) -> list:
-    """Return a page of users sorted by newest first, optionally filtered."""
+    """Возвращает страницу пользователей, отсортированных по дате регистрации, с опциональной фильтрацией."""
     with get_db_connection() as conn:
         if search:
             like = f"%{search}%"
@@ -176,7 +176,7 @@ def get_users_page(limit: int = 8, offset: int = 0, search: str = None) -> list:
         return [dict(r) for r in rows]
 
 def get_admins():
-    """Return all users with role 'admin' or 'tech_admin' stored in the DB."""
+    """Возвращает всех пользователей с ролью 'admin' или 'tech_admin' из базы данных."""
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT user_id, display_name, role, consent_given
@@ -187,7 +187,7 @@ def get_admins():
         return [dict(r) for r in rows]
 
 def set_user_role(user_id, role):
-    """Update role of an existing user. Creates a stub record if user doesn't exist yet."""
+    """Обновляет роль существующего пользователя. Создаёт заглушку, если пользователя нет."""
     user_id_str = str(user_id)
     now = datetime.now().isoformat()
     with get_db_connection() as conn:
@@ -205,13 +205,13 @@ def get_user(user_id):
 
 def get_user_role(user_id, default_admin_ids, default_tech_admin_ids):
     user_id_str = str(user_id)
-    # Check default IDs from configuration first
+    # Сначала проверяем ID из конфигурации (.env имеет приоритет)
     if user_id_str in default_tech_admin_ids:
         return "tech_admin"
     if user_id_str in default_admin_ids:
         return "admin"
 
-    # Otherwise check database
+    # Иначе проверяем базу данных
     user = get_user(user_id_str)
     if user:
         return user["role"]
@@ -244,27 +244,27 @@ def give_consent(user_id, display_name, role="initiator", version="1.0"):
         """, (user_id_str, display_name, role, now, version))
         conn.commit()
 
-    # Log consent acceptance in audit log (use request_id = 0 for user actions not linked to requests)
-    log_audit_event(0, "consent_accepted", user_id_str, None, None, f"Consent version {version} accepted")
+    # Запись принятия согласия в журнал аудита (request_id = 0 для действий не связанных с заявкой)
+    log_audit_event(0, "consent_accepted", user_id_str, None, None, f"Согласие версии {version} принято")
 
 def delete_user_data(user_id):
     user_id_str = str(user_id)
-    # Log audit event for data deletion BEFORE deleting
-    log_audit_event(0, "user_data_deleted", user_id_str, None, None, "User requested complete data deletion")
+    # Записываем событие удаления ДО фактического удаления данных
+    log_audit_event(0, "user_data_deleted", user_id_str, None, None, "Пользователь запросил полное удаление данных")
 
     with get_db_connection() as conn:
-        # Delete request custom fields first
+        # Сначала удаляем кастомные поля заявок пользователя
         conn.execute("""
             DELETE FROM request_custom_fields
             WHERE request_id IN (SELECT request_id FROM requests WHERE initiator_id = ?)
         """, (user_id_str,))
-        # Delete requests initiated by the user
+        # Удаляем заявки пользователя
         conn.execute("DELETE FROM requests WHERE initiator_id = ?", (user_id_str,))
-        # Delete user record itself
+        # Удаляем запись пользователя
         conn.execute("DELETE FROM users WHERE user_id = ?", (user_id_str,))
         conn.commit()
 
-# --- Request Management ---
+# --- Управление заявками ---
 
 def create_request(initiator_id, visitor_name, visit_date, visit_time, visit_zone, visit_purpose):
     initiator_id_str = str(initiator_id)
@@ -332,7 +332,7 @@ def get_user_requests(user_id):
 def get_admin_queue():
     auto_expire_requests()
     with get_db_connection() as conn:
-        # Join with users to get initiator's display name
+        # Присоединяем таблицу пользователей для получения имени инициатора
         rows = conn.execute("""
             SELECT r.*, u.display_name as initiator_name
             FROM requests r
@@ -378,7 +378,7 @@ def submit_clarification_answer(request_id, answer, performer_id):
     log_audit_event(request_id, "clarification_answered", performer_id_str, old_status, "review", answer)
     return True
 
-# --- Audit Log & Technical Admin ---
+# --- Журнал аудита и технический администратор ---
 
 def log_audit_event(request_id, event_type, performer_id, old_status, new_status, comment=None):
     performer_id_str = str(performer_id)
@@ -424,7 +424,7 @@ def get_system_stats():
             "status_stats": status_stats
         }
 
-# --- Custom Fields Helper Functions ---
+# --- Вспомогательные функции кастомных полей ---
 
 def add_custom_field(zone_name, field_name, is_required, description):
     now = datetime.now().isoformat()
@@ -488,17 +488,17 @@ def get_request_custom_fields(request_id):
         """, (request_id,)).fetchall()
         return {r["field_name"]: r["field_value"] for r in rows}
 
-# --- Zones Management ---
+# --- Управление зонами ---
 
 def zone_btn_label(zone_name: str, prefix: str = "", max_len: int = 36) -> str:
-    """Truncate a zone name to fit inside a messenger button label."""
+    """Обрезает название зоны до допустимой длины для кнопки мессенджера."""
     label = f"{prefix}{zone_name}" if prefix else zone_name
     if len(label) > max_len:
         label = label[:max_len - 1] + "…"
     return label
 
 def get_zones():
-    """Return list of active zone name strings, ordered by display_order."""
+    """Возвращает список активных зон в виде строк, отсортированных по display_order."""
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT zone_name FROM zones
@@ -508,7 +508,7 @@ def get_zones():
         return [r["zone_name"] for r in rows]
 
 def get_zones_with_ids():
-    """Return list of zone dicts {zone_id, zone_name, display_order, is_active}."""
+    """Возвращает список зон в виде словарей {zone_id, zone_name, display_order, is_active}."""
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT zone_id, zone_name, display_order, is_active FROM zones
@@ -522,10 +522,10 @@ def get_zone(zone_id):
         return dict(row) if row else None
 
 def add_zone(zone_name):
-    """Add a new active zone. Returns zone_id or None if name already exists."""
+    """Добавляет новую активную зону. Возвращает zone_id или None при дублировании имени."""
     now = datetime.now().isoformat()
     with get_db_connection() as conn:
-        # Compute next display_order
+        # Вычисляем следующий порядок отображения
         max_order = conn.execute("SELECT MAX(display_order) FROM zones").fetchone()[0]
         next_order = (max_order or 0) + 1
         try:
@@ -537,16 +537,16 @@ def add_zone(zone_name):
             conn.commit()
             return cursor.lastrowid
         except Exception:
-            return None  # Duplicate name
+            return None  # Дублирующееся название
 
 def delete_zone(zone_id):
-    """Delete a zone by ID."""
+    """Удаляет зону по ID."""
     with get_db_connection() as conn:
         conn.execute("DELETE FROM zones WHERE zone_id = ?", (zone_id,))
         conn.commit()
 
 def rename_zone(zone_id, new_name):
-    """Rename a zone and update custom_fields zone_name references. Returns True on success."""
+    """Переименовывает зону и обновляет ссылки в кастомных полях. Возвращает True при успехе."""
     zone = get_zone(zone_id)
     if not zone:
         return False
@@ -555,17 +555,17 @@ def rename_zone(zone_id, new_name):
     with get_db_connection() as conn:
         try:
             conn.execute("UPDATE zones SET zone_name = ? WHERE zone_id = ?", (new_name, zone_id))
-            # Also update custom_fields references
+            # Обновляем ссылки в кастомных полях
             conn.execute("UPDATE custom_fields SET zone_name = ? WHERE zone_name = ?", (new_name, old_name))
             conn.commit()
             return True
         except Exception:
-            return False  # Duplicate name
+            return False  # Дублирующееся название
 
-# --- Auto Expiration & Expiry Notifications ---
+# --- Автоматическое истечение срока и уведомления ---
 
 def auto_expire_requests():
-    """Expire requests past their visit date/time. Returns list of newly expired request dicts."""
+    """Переводит заявки с прошедшей датой/временем в статус 'expired'. Возвращает список новых просрочек."""
     now = datetime.now()
     newly_expired = []
     with get_db_connection() as conn:
@@ -612,7 +612,7 @@ def auto_expire_requests():
     return newly_expired
 
 def get_unnotified_expired():
-    """Return list of expired requests that haven't sent a notification yet."""
+    """Возвращает список просроченных заявок, по которым уведомление ещё не отправлялось."""
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT request_id, initiator_id, visitor_name, visit_date, visit_time, visit_zone
@@ -622,7 +622,7 @@ def get_unnotified_expired():
         return [dict(r) for r in rows]
 
 def mark_expire_notified(request_ids):
-    """Mark a list of request IDs as having sent expiry notifications."""
+    """Помечает список заявок как уведомлённых об истечении срока."""
     if not request_ids:
         return
     with get_db_connection() as conn:
@@ -633,7 +633,7 @@ def mark_expire_notified(request_ids):
         )
         conn.commit()
 
-# --- Period-based Statistics ---
+# --- Статистика за период ---
 
 def get_period_stats(days=None):
     with get_db_connection() as conn:

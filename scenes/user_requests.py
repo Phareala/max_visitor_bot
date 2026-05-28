@@ -20,7 +20,7 @@ class UserRequestsScene:
         pass
 
     async def show_user_requests(self, n, idx=0):
-        # Send expiry notifications for any newly expired requests (Task 2.2)
+        # Отправляем уведомления об истечении срока для новых просроченных заявок
         await notifications.send_expiry_notifications(n)
 
         user_id = str(n.sender_id())
@@ -80,15 +80,15 @@ class UserRequestsScene:
         buttons = []
         action_row = []
 
-        # Cancel button (available before final decision)
+        # Кнопка отмены (доступна до окончательного решения)
         if req["status"] in ["draft", "review", "clarification"]:
             action_row.append({"type": "callback", "text": "❌ Отменить заявку", "payload": f"/user_cancel_{req['request_id']}"})
 
-        # Clarification answer button
+        # Кнопка ответа на уточнение
         if req["status"] == "clarification":
             action_row.append({"type": "callback", "text": "✍️ Ответить", "payload": f"/user_reply_prompt_{req['request_id']}"})
 
-        # Close button (for admins and tech admins on approved/rejected requests)
+        # Кнопка закрытия (для администраторов по одобренным/отклонённым заявкам)
         admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
         tech_admin_ids = [x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()]
         role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
@@ -99,7 +99,7 @@ class UserRequestsScene:
         if action_row:
             buttons.append(action_row)
 
-        # Navigation row
+        # Ряд навигации по заявкам
         nav_row = []
         if idx > 0:
             nav_row.append({"type": "callback", "text": "◀️ Предыдущая", "payload": "/user_prev"})
@@ -138,7 +138,7 @@ class UserRequestsScene:
         step = state_data.get("step", "idle")
         idx = state_data.get("idx", 0)
 
-        # List navigation
+        # Навигация по списку заявок
         if text == "/user_prev":
             await self.show_user_requests(n, idx - 1)
             return
@@ -149,7 +149,7 @@ class UserRequestsScene:
             await self.show_user_requests(n, idx)
             return
 
-        # Cancel request
+        # Отмена заявки инициатором
         if text.startswith("/user_cancel_"):
             req_id = int(text.split("_")[2])
             req = database.get_request(req_id)
@@ -162,7 +162,7 @@ class UserRequestsScene:
             await self.show_user_requests(n, idx)
             return
 
-        # Close request (admin only)
+        # Закрытие заявки (только администраторы)
         if text.startswith("/user_close_"):
             req_id = int(text.split("_")[2])
             req = database.get_request(req_id)
@@ -183,7 +183,7 @@ class UserRequestsScene:
             await self.show_user_requests(n, idx)
             return
 
-        # Reply prompt
+        # Запрос ответа на уточнение
         if text.startswith("/user_reply_prompt_"):
             req_id = int(text.split("_")[3])
             n.state_manager.update_state_data(n.state_id, {
@@ -201,7 +201,7 @@ class UserRequestsScene:
             )
             return
 
-        # Process clarification reply text
+        # Обработка текста ответа инициатора на уточнение
         if step == "clarification_reply":
             req_id = state_data["target_req_id"]
             user_id = str(n.sender_id())
@@ -212,7 +212,7 @@ class UserRequestsScene:
                 database.submit_clarification_answer(req_id, answer_text, user_id)
                 await n.reply("✅ Ваш ответ успешно отправлен. Заявка возвращена на рассмотрение в службу безопасности.")
 
-                # Notify administrators
+                # Уведомляем администраторов ИБ о полученном ответе
                 admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
                 notify_text = (
                     f"🔔 **Инициатор ответил на запрос уточнения по заявке №{req_id}!**\n\n"

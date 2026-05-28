@@ -2,16 +2,16 @@ import os
 import database
 from maxbot_api_client_python import utils
 
-# Kept for reference / seed data only — runtime uses database.get_zones()
+# Только для справки — в рантайме используется database.get_zones()
 DEFAULT_ZONES = database.DEFAULT_ZONES
 
-# Backward-compat alias used in a few places that import CAMPUSES
+# Псевдоним для обратной совместимости
 def get_campuses():
-    """Return current active zones from the database."""
+    """Возвращает текущие активные зоны из базы данных."""
     return database.get_zones()
 
-# Module-level CAMPUSES is kept for any legacy imports; refreshed each call via get_campuses()
-CAMPUSES = DEFAULT_ZONES  # initial fallback; scenes should call database.get_zones() directly
+# Переменная CAMPUSES на уровне модуля — для устаревших импортов; актуальные зоны через get_campuses()
+CAMPUSES = DEFAULT_ZONES  # начальный фолбэк; сцены должны вызывать database.get_zones() напрямую
 
 
 class CustomFieldsMgmtScene:

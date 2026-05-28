@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import database
 import notifications
 
-# Queue accumulation threshold — warn admins when pending requests reach this number
+# Порог накопления очереди — предупреждаем администраторов, когда заявок накопится столько
 QUEUE_ALERT_THRESHOLD = 5
 
 
@@ -52,7 +52,7 @@ class CreatePassScene:
         wizard_data = state_data.get("wizard_data", {})
         edit_mode = state_data.get("edit_mode", False)
 
-        # Handle cancel action
+        # Обработка отмены
         if text == "/cancel_wizard":
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
@@ -60,7 +60,7 @@ class CreatePassScene:
             await menu_scene.send_main_menu(n)
             return
 
-        # Handle field edit commands from summary screen
+        # Обработка команд редактирования стандартных полей с экрана сводки
         if text.startswith("/edit_"):
             field = text.split("_", 1)[1]
             n.state_manager.update_state_data(n.state_id, {
@@ -94,7 +94,7 @@ class CreatePassScene:
                 await n.reply_with_keyboard("Введите новую **цель визита**:", "markdown", cancel_btn)
             return
 
-        # Handle field edit commands for custom fields
+        # Обработка команд редактирования кастомных полей с экрана сводки
         if text.startswith("/edit_cf_"):
             field_name = text.split("_", 2)[2]
             n.state_manager.update_state_data(n.state_id, {
@@ -109,7 +109,7 @@ class CreatePassScene:
             await n.reply_with_keyboard(desc, "markdown", cancel_btn)
             return
 
-        # Back to summary button
+        # Кнопка возврата к сводке
         if text == "/back_to_summary":
             n.state_manager.update_state_data(n.state_id, {
                 "step": "summary",
@@ -118,10 +118,10 @@ class CreatePassScene:
             await self.show_summary(n, wizard_data)
             return
 
-        # Handle confirm submission
+        # Обработка подтверждения и отправки заявки
         if text == "/confirm_wizard" and step == "summary":
             user_id = str(n.sender_id())
-            # Save request as draft first
+            # Сохраняем заявку как черновик
             req_id = database.create_request(
                 initiator_id=user_id,
                 visitor_name=wizard_data["visitor_name"],
@@ -131,11 +131,11 @@ class CreatePassScene:
                 visit_purpose=wizard_data["visit_purpose"]
             )
 
-            # Save custom fields values
+            # Сохраняем значения кастомных полей
             for name, val in wizard_data.get("custom_fields", {}).items():
                 database.save_request_custom_field_value(req_id, name, val)
 
-            # Immediately transition to "review" status
+            # Сразу переводим в статус «На рассмотрении»
             database.update_request_status(req_id, "review", user_id)
 
             await n.reply(
@@ -145,20 +145,20 @@ class CreatePassScene:
                 f"Заявка передана в службу безопасности. Мы уведомим вас при изменении статуса."
             )
 
-            # --- 2.1: Notify security admins about the new request ---
+            # Уведомляем администраторов ИБ о новой заявке
             await self._notify_admins_new_request(n, req_id, wizard_data)
 
-            # Notify about any requests that expired while we were working
+            # Уведомляем об истёкших заявках (если срок вышел пока заполнялся мастер)
             await notifications.send_expiry_notifications(n)
 
-            # Go back to main menu
+            # Возвращаемся в главное меню
             from scenes.main_menu import MainMenuScene
             menu_scene = MainMenuScene()
             n.activate_next_scene(menu_scene)
             await menu_scene.send_main_menu(n)
             return
 
-        # Process custom fields updates in edit mode
+        # Обработка изменений кастомных полей в режиме редактирования
         if step.startswith("editcf_"):
             field_name = step.split("_", 1)[1]
             val = text.strip()
@@ -185,9 +185,9 @@ class CreatePassScene:
             await self.show_summary(n, wizard_data)
             return
 
-        # Process standard step-by-step inputs
+        # Обработка пошагового ввода стандартных полей
         if step == "visitor_name":
-            # Validation: not empty, not only digits
+            # Валидация: не пустое, не только цифры
             cleaned = text.strip()
             if not cleaned or cleaned.isdigit() or len(cleaned) < 2:
                 buttons = [[{"type": "callback", "text": "❌ Отменить", "payload": "/cancel_wizard"}]]
@@ -218,7 +218,7 @@ class CreatePassScene:
                 )
 
         elif step == "visit_date":
-            # Calculate quick date options
+            # Вычисляем быстрые варианты дат
             today = datetime.now()
             today_date = datetime(today.year, today.month, today.day)
             quick_dates = {
@@ -233,7 +233,7 @@ class CreatePassScene:
             if input_val in quick_dates:
                 date_str = quick_dates[input_val]
             else:
-                # Parse manual format (DD.MM.YYYY)
+                # Парсинг вручную введённой даты в формате ДД.ММ.ГГГГ
                 match = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", text.strip())
                 if match:
                     try:
@@ -357,7 +357,7 @@ class CreatePassScene:
                 n.state_manager.update_state_data(n.state_id, {"step": "summary", "edit_mode": False})
                 await self.show_summary(n, wizard_data)
             else:
-                # Dynamic check for custom fields configuration
+                # Динамическая проверка настроенных кастомных полей для выбранной зоны
                 custom_fields = database.get_custom_fields(wizard_data["visit_zone"])
                 if custom_fields:
                     n.state_manager.update_state_data(n.state_id, {
@@ -382,7 +382,7 @@ class CreatePassScene:
                     })
                     await self.show_summary(n, wizard_data)
 
-        # Process custom fields collection steps
+        # Обработка шагов сбора кастомных полей
         elif step.startswith("custom_"):
             field_id = int(step.split("_")[1])
             custom_fields_to_ask = state_data["custom_fields_to_ask"]
@@ -477,7 +477,7 @@ class CreatePassScene:
         await n.reply_with_keyboard(summary_text, "markdown", buttons)
 
     async def _notify_admins_new_request(self, n, req_id: int, wizard_data: dict):
-        """Notify all admins about a newly submitted request (Task 2.1)."""
+        """Уведомляет всех администраторов ИБ о новой поступившей заявке."""
         admin_ids = [x.strip() for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
         if not admin_ids:
             return

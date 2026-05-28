@@ -242,12 +242,12 @@ class MainMenuScene:
                                 )
                                 await n.bot.api.messages.send_message_async(req)
                             else:
-                                raise Exception("Empty upload response/token")
+                                raise Exception("Пустой ответ при загрузке файла")
                         finally:
                             if os.path.exists(temp_path):
                                 os.remove(temp_path)
                     except Exception as e:
-                        logger.exception(f"Failed to export CSV as file: {e}")
+                        logger.exception(f"Не удалось отправить CSV-файл: {e}")
                         preview_csv = csv_content[:1500]
                         if len(csv_content) > 1500:
                             preview_csv += "\n... [остальные строки обрезаны]"
@@ -337,7 +337,7 @@ class MainMenuScene:
         role = database.get_user_role(user_id, admin_ids, tech_admin_ids)
 
         if role == "admin":
-            # Show queue size in the admin panel header
+            # Показываем количество заявок в очереди в заголовке панели администратора
             queue = database.get_admin_queue()
             queue_size = len(queue)
             queue_hint = f" (`{queue_size}` в очереди)" if queue_size > 0 else ""

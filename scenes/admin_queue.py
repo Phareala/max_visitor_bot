@@ -9,7 +9,7 @@ class AdminQueueScene:
         pass
 
     async def show_queue(self, n, idx=0):
-        # Send expiry notifications before displaying queue (Task 2.2)
+        # Отправляем уведомления об истечении срока перед показом очереди
         await notifications.send_expiry_notifications(n)
 
         queue = database.get_admin_queue()
@@ -21,7 +21,7 @@ class AdminQueueScene:
             await n.reply_with_keyboard("📥 **Очередь заявок**\n\nВ данный момент активных заявок на рассмотрении нет.", "markdown", buttons)
             return
 
-        # Constrain index
+        # Ограничиваем индекс допустимым диапазоном
         if idx < 0:
             idx = 0
         if idx >= total:
@@ -64,7 +64,7 @@ class AdminQueueScene:
             ]
         ]
 
-        # Add navigation buttons if total > 1
+        # Добавляем кнопки навигации, если заявок больше одной
         nav_row = []
         if idx > 0:
             nav_row.append({"type": "callback", "text": "◀️ Предыдущая", "payload": "/admin_prev"})
@@ -103,7 +103,7 @@ class AdminQueueScene:
         step = state_data.get("step", "idle")
         idx = state_data.get("idx", 0)
 
-        # Queue navigation
+        # Навигация по очереди
         if text == "/admin_prev":
             await self.show_queue(n, idx - 1)
             return
@@ -114,7 +114,7 @@ class AdminQueueScene:
             await self.show_queue(n, idx)
             return
 
-        # Approve action
+        # Согласование заявки
         if text.startswith("/admin_approve_"):
             req_id = int(text.split("_")[2])
             req = database.get_request(req_id)
@@ -123,7 +123,7 @@ class AdminQueueScene:
                 database.update_request_status(req_id, "approved", admin_id, "Согласовано администратором")
                 await n.reply(f"✅ Заявка `#{req_id}` успешно согласована.")
 
-                # Notify initiator
+                # Уведомляем инициатора об одобрении
                 notify_text = (
                     f"✅ **Ваша заявка №{req_id} одобрена!**\n\n"
                     f"👤 Гость: {req['visitor_name']}\n"
@@ -136,7 +136,7 @@ class AdminQueueScene:
             await self.show_queue(n, idx)
             return
 
-        # Reject prompt
+        # Запрос причины отказа
         if text.startswith("/admin_reject_prompt_"):
             req_id = int(text.split("_")[3])
             n.state_manager.update_state_data(n.state_id, {
@@ -160,7 +160,7 @@ class AdminQueueScene:
             )
             return
 
-        # Reject reason selected
+        # Выбрана причина отказа
         if text.startswith("/admin_reject_reason_"):
             parts = text.split("_")
             req_id = int(parts[3])
@@ -187,7 +187,7 @@ class AdminQueueScene:
             )
             return
 
-        # Skip comment or process comment
+        # Пропуск комментария или обработка введённого комментария к отказу
         if step == "reject_comment":
             req_id = state_data["target_req_id"]
             reason = state_data["reason"]
@@ -202,7 +202,7 @@ class AdminQueueScene:
 
             req = database.get_request(req_id)
             if req:
-                # Notify initiator
+                # Уведомляем инициатора об отклонении
                 notify_text = (
                     f"❌ **Ваша заявка №{req_id} отклонена.**\n\n"
                     f"• Причина: {reason}\n"
@@ -215,7 +215,7 @@ class AdminQueueScene:
             await self.show_queue(n, idx)
             return
 
-        # Clarification prompt
+        # Запрос уточнения от администратора
         if text.startswith("/admin_clarify_prompt_"):
             req_id = int(text.split("_")[3])
             n.state_manager.update_state_data(n.state_id, {
@@ -232,7 +232,7 @@ class AdminQueueScene:
             )
             return
 
-        # Process clarification question text
+        # Обработка текста вопроса уточнения
         if step == "clarification_question":
             req_id = state_data["target_req_id"]
             admin_id = str(n.sender_id())
@@ -243,7 +243,7 @@ class AdminQueueScene:
                 database.set_clarification_question(req_id, question_text, admin_id)
                 await n.reply(f"📨 Запрос уточнения отправлен инициатору заявки `#{req_id}`.")
 
-                # Notify initiator
+                # Уведомляем инициатора о запросе уточнения
                 notify_text = (
                     f"⚠️ **По вашей заявке №{req_id} требуется уточнение.**\n\n"
                     f"💬 Вопрос службы безопасности:\n"

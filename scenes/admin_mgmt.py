@@ -1,4 +1,4 @@
-"""Admin management scene for the technical administrator."""
+"""Сцена управления администраторами для технического администратора."""
 import os
 import database
 
@@ -90,7 +90,7 @@ class AdminMgmtScene:
             await self.show_admins_list(n)
             return
 
-        # ── Добавить администратора ───────────────────────────────────────────
+        # ── Добавление администратора ────────────────────────────────────────
 
         if text == "/adm_add":
             n.state_manager.update_state_data(n.state_id, {"step": "adm_enter_id"})
@@ -120,7 +120,7 @@ class AdminMgmtScene:
                 )
                 return
 
-            # Проверим, не является ли этот ID уже суперадмином из .env
+            # Проверяем, не является ли этот ID уже администратором из .env
             env_admin_ids = {x.strip() for x in os.getenv("ADMIN_USER_IDS",      "").split(",") if x.strip()}
             env_tech_ids  = {x.strip() for x in os.getenv("TECH_ADMIN_USER_IDS", "").split(",") if x.strip()}
             if uid in env_admin_ids | env_tech_ids:
@@ -164,7 +164,7 @@ class AdminMgmtScene:
             await self.show_admins_list(n)
             return
 
-        # ── Снять роль ────────────────────────────────────────────────────────
+        # ── Снятие роли ──────────────────────────────────────────────────────
 
         if text.startswith("/adm_revoke_"):
             uid = text.split("_", 2)[2]
@@ -205,5 +205,5 @@ class AdminMgmtScene:
             await self.show_admins_list(n)
             return
 
-        # Fallback
+        # По умолчанию: возврат к списку администраторов
         await self.show_admins_list(n)

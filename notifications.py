@@ -1,4 +1,4 @@
-"""Shared notification utilities for the visitor pass bot."""
+"""Общие утилиты уведомлений для бота электронного бюро пропусков."""
 import logging
 import database
 from maxbot_api_client_python.types import models
@@ -7,7 +7,7 @@ logger = logging.getLogger("max_visitor_bot")
 
 
 async def send_notification(n, target_user_id, text: str):
-    """Send a Markdown notification message to a given user ID."""
+    """Отправляет Markdown-уведомление заданному пользователю."""
     try:
         req = models.SendMessageReq(
             user_id=int(target_user_id),
@@ -16,20 +16,20 @@ async def send_notification(n, target_user_id, text: str):
         )
         await n.bot.api.messages.send_message_async(req)
     except Exception as e:
-        logger.warning(f"Failed to send notification to {target_user_id}: {e}")
+        logger.warning(f"Не удалось отправить уведомление пользователю {target_user_id}: {e}")
 
 
 async def notify_admins(n, admin_ids: list[str], text: str):
-    """Broadcast a notification to all admin IDs."""
+    """Рассылает уведомление всем администраторам из списка."""
     for admin_id in admin_ids:
         await send_notification(n, admin_id, text)
 
 
 async def send_expiry_notifications(n):
     """
-    Find expired requests that haven't been notified yet and send a message
-    to each initiator. Should be called on any update that triggers auto-expire
-    (e.g. showing the queue, showing a user's requests, creating a new request).
+    Находит просроченные заявки без уведомления и отправляет сообщение каждому инициатору.
+    Вызывается при любом обновлении, которое может спровоцировать авто-просрочку
+    (например, показ очереди, списка заявок пользователя, создание новой заявки).
     """
     expired_items = database.get_unnotified_expired()
     if not expired_items:
@@ -50,4 +50,4 @@ async def send_expiry_notifications(n):
 
     if notified_ids:
         database.mark_expire_notified(notified_ids)
-        logger.info(f"Sent expiry notifications for requests: {notified_ids}")
+        logger.info(f"Отправлены уведомления об истечении срока для заявок: {notified_ids}")
